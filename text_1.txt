@@ -1,576 +1,414 @@
-"use client";
-import { usePathname, useRouter } from "next/navigation";
+import Link from "next/link";
+import React, { useMemo, useState } from "react";
 import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useState,
-} from "react";
-import { useDispatch, useSelector } from "react-redux";
-import LoadingSkeleton from "../loader/LoadingSkeleton";
-import { getIPInfo } from "../redux/features/auth/authThunks";
-import { fetchClientPackage } from "../redux/features/package/packageThunks";
-import { fetchUserProfile } from "../redux/features/user/userThunks";
-
-const RootContext = createContext();
-
-export const useRootData = () => {
-  const context = useContext(RootContext);
-  if (!context) throw new Error("useRootData must be used within RootProvider");
-  return context;
-};
-
-export const  RootProvider = ({ children, cookie }) => {
-  const dispatch = useDispatch();
-  const router = useRouter();
-  const pathname = usePathname();
-  const { user } = useSelector((state) => state.user);
-  const { onePackage } = useSelector((state) => state.package);
-  const [isInitializing, setIsInitializing] = useState(true);
-  const [ipInfo, setIpInfo] = useState(null);
-  const [isRefreshingPackage, setIsRefreshingPackage] = useState(false);
-
-  const isPackageExpired =
-    onePackage?.endDate && new Date() > new Date(onePackage.endDate);
-
-  const hasRequiredPhoneDetails = user?.phoneNumber && user?.countryCode;
-
-  const isRouteAccessible = useCallback((path) => {
-    const publicRoutes = ["/", "/upgrade-plan", "/contact-us"];
-    const profileSetupRoutes = ["/my-account"];
-
-    return (
-      publicRoutes.some((route) => path === route || path.startsWith(route)) ||
-      profileSetupRoutes.some(
-        (route) => path === route || path.startsWith(route)
-      )
-    );
-  }, []);
-
-  const refreshPackage = useCallback(async () => {
-    setIsRefreshingPackage(true);
-    try {
-      await dispatch(fetchClientPackage());
-    } finally {
-      setIsRefreshingPackage(false);
-    }
-  }, [dispatch]);
-
-  // Redirect logic for missing phone details
-  useEffect(() => {
-    if (!isInitializing && cookie && user) {
-      if (!hasRequiredPhoneDetails && !pathname.startsWith("/my-account")) {
-        router.replace("/my-account?setup=phone");
-        return;
-      }
-
-      if (isPackageExpired && !isRouteAccessible(pathname)) {
-        router.replace("/");
-      }
-    }
-  }, [
-    pathname,
-    isPackageExpired,
-    isInitializing,
-    router,
-    isRouteAccessible,
-    hasRequiredPhoneDetails,
-    user,
-    cookie,
-  ]);
-
-  useEffect(() => {
-    const loadData = async () => {
-      try {
-        
-        // Fetch IP info first
-        try {
-          const ipResponse = await getIPInfo();
-          setIpInfo(ipResponse);
-        } catch (error) {
-          console.error("IP fetch error:", error);
-        }
-        setIsInitializing(true);
-
-        if (cookie) {
-          await Promise.all([
-            dispatch(fetchUserProfile()),
-            dispatch(fetchClientPackage()),
-          ]);
-        }
-      } finally {
-        setIsInitializing(false);
-      }
-    };
-    loadData();
-  }, [dispatch, cookie]);
-
-  if (isInitializing && cookie) return <LoadingSkeleton />;
-
-  return (
-    <RootContext.Provider
-      value={{
-        ipInfo,
-        user,
-        onePackage,
-        isPackageExpired,
-        hasRequiredPhoneDetails,
-        refreshPackage,
-        isRefreshingPackage,
-      }}
-    >
-      {children}
-    </RootContext.Provider>
-  );
-};
-
-
-
-
-"use client";
-import Navbar from "@/src/components/layOut/NavBar/NavBar";
-import SideBar from "@/src/components/layOut/Sidebar/SideBar";
-import { useRootData } from "@/src/context/rootContext";
-import dynamic from "next/dynamic";
-import React, { useState } from "react";
-
-const StorageWarningBanner = dynamic(() =>
-  import("@/src/components/Package/StorageWarningBanner")
-);
-
-const PackageExpiryNotification = dynamic(() =>
-  import("@/src/components/Package/PackageExpiryNotification")
-);
-
-export default function PhotoLayOut({ children }) {
-  const { onePackage } = useRootData();
-  const [showStorageWarning, setShowStorageWarning] = useState(true);
-  const packageEndDate = onePackage?.endDate;
-  const totalLimit = onePackage?.packageId?.totalPhotoMB || 0;
-  const totalUsed = onePackage?.eventStatistics?.totalMBUsed || 0;
-  const storagePercentage = (totalUsed / totalLimit) * 100;
-  const shouldShowWarning = storagePercentage >= 80 && showStorageWarning;
-  return (
-    <main className="relative flex h-screen overflow-hidden bg-[#f4f4f4]">
-      <div>
-        <SideBar />
-      </div>
-      <div className="w-full xl:mx-5 mx-3 flex flex-col">
-        <Navbar />
-        <div className="flex flex-col gap-2 fixed top-4 right-0 md:right-4 z-50">
-          <PackageExpiryNotification endDate={packageEndDate} />
-          {shouldShowWarning && (
-            <StorageWarningBanner
-              storagePercentage={storagePercentage}
-              totalUsed={totalUsed}
-              totalLimit={totalLimit}
-              onClose={() => setShowStorageWarning(false)}
-              showProgressBar={true}
-              showCloseButton={true}
-            />
-          )}
-        </div>
-        <section className="flex-1 bg-white p-4 rounded-t-[20px] overflow-hidden">
-          {children}
-        </section>
-      </div>
-    </main>
-  );
-}
-
-
-
-
-import React from "react";
-import { FiAlertTriangle, FiAlertCircle, FiX } from "react-icons/fi";
-
-const StorageWarningBanner = ({
-  storagePercentage,
-  totalUsed,
-  totalLimit,
-  onClose,
-  className = "",
-  showProgressBar = true,
-  showCloseButton = true,
-}) => {
-  const getWarningConfig = () => {
-    if (storagePercentage >= 100) {
-      return {
-        icon: FiAlertCircle,
-        title: "Storage Full",
-        message: `You've used ${totalUsed.toFixed(
-          1
-        )}MB of ${totalLimit}MB. Please upgrade your package or delete some events to continue.`,
-        bgColor: "bg-red-50",
-        borderColor: "border-red-200",
-        textColor: "text-red-800",
-        iconColor: "text-red-600",
-        progressColor: "bg-red-500",
-        accentColor: "bg-red-500",
-        buttonColor: "text-red-500 hover:text-red-700 hover:bg-red-100",
-        alertLevel: "critical",
-      };
-    } else if (storagePercentage >= 90) {
-      return {
-        icon: FiAlertTriangle,
-        title: "Storage Almost Full",
-        message: `You've used ${totalUsed.toFixed(
-          1
-        )}MB of ${totalLimit}MB (${storagePercentage.toFixed(
-          1
-        )}%). Consider upgrading your package soon.`,
-        bgColor: "bg-orange-50",
-        borderColor: "border-orange-200",
-        textColor: "text-orange-800",
-        iconColor: "text-orange-600",
-        progressColor: "bg-orange-500",
-        accentColor: "bg-orange-500",
-        buttonColor:
-          "text-orange-500 hover:text-orange-700 hover:bg-orange-100",
-        alertLevel: "warning",
-      };
-    } else if (storagePercentage >= 80) {
-      return {
-        icon: FiAlertTriangle,
-        title: "Storage Warning",
-        message: `You've used ${storagePercentage.toFixed(
-          1
-        )}% of your package storage. Plan for an upgrade to avoid running out of space.`,
-        bgColor: "bg-yellow-50",
-        borderColor: "border-yellow-200",
-        textColor: "text-yellow-800",
-        iconColor: "text-yellow-600",
-        progressColor: "bg-yellow-500",
-        accentColor: "bg-yellow-500",
-        buttonColor:
-          "text-yellow-500 hover:text-yellow-700 hover:bg-yellow-100",
-        alertLevel: "notice",
-      };
-    }
-    return null;
-  };
-
-  const config = getWarningConfig();
-  if (!config) return null;
-
-  return (
-    <div
-      className={`
-        ${config.bgColor} 
-        ${config.borderColor}
-        w-full border rounded-lg shadow-sm
-        transform transition-all duration-300 ease-out
-        relative overflow-hidden
-        ${className}
-      `}
-    >
-      {/* Top accent bar */}
-      <div className={`${config.accentColor} h-1 w-full`} />
-
-      {/* Main banner content */}
-      <div className="flex items-center justify-between p-2.5 sm:p-4">
-        {/* Left side - Icon and message */}
-        <div className="flex items-center space-x-3 flex-1">
-          <div className={`${config.iconColor} flex-shrink-0`}>
-            <config.icon className="w-5 h-5" />
-          </div>
-
-          <div className="flex-1">
-            <div className="flex items-center space-x-2">
-              <span className={`${config.textColor} font-semibold text-xs sm:text-sm`}>
-                Package Storage:
-              </span>
-              <span className={`${config.textColor} text-xs sm:text-sm`}>
-                {config.title}
-              </span>
-            </div>
-
-            <p className={`${config.textColor} text-xs opacity-75 mt-1`}>
-              {config.message}
-            </p>
-
-            {/* Storage info and progress bar inline for larger screens */}
-            {showProgressBar && (
-              <div className="mt-2">
-                <div className="flex items-center space-x-3">
-                  <div className="flex-1">
-                    <div className="bg-white/60 rounded-full h-2 overflow-hidden">
-                      <div
-                        className={`h-2 rounded-full transition-all duration-500 ${config.progressColor}`}
-                        style={{
-                          width: `${Math.min(storagePercentage, 100)}%`,
-                        }}
-                      />
-                    </div>
-                  </div>
-                  <div className="flex items-center sm:space-x-2 text-xs opacity-75 flex-shrink-0">
-                    <span>{totalUsed.toFixed(1)} MB</span>
-                    <span>/</span>
-                    <span>{totalLimit} MB</span>
-                    <span>({storagePercentage.toFixed(1)}%)</span>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Right side - Close button */}
-        <div className="flex items-center sm:ml-4 fixed top-2 right-1">
-          {showCloseButton && onClose && (
-            <button
-              onClick={onClose}
-              className={`
-                ${config.buttonColor}
-                p-2 rounded-full transition-all duration-200
-                hover:rotate-90 transform flex-shrink-0
-              `}
-              aria-label="Close warning"
-            >
-              <FiX className="w-4 h-4" />
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Bottom progress bar (alternative to inline progress) */}
-      {showProgressBar && (
-        <div className="h-1 bg-gray-200">
-          <div
-            className={`h-full transition-all duration-500 ${config.progressColor}`}
-            style={{ width: `${Math.min(storagePercentage, 100)}%` }}
-          />
-        </div>
-      )}
-    </div>
-  );
-};
-
-export default StorageWarningBanner;
-
-
-
-import { useEffect, useState } from "react";
-import {
-  FiAlertTriangle,
-  FiX,
+  FiFolder,
+  FiImage,
+  FiChevronLeft,
+  FiSettings,
+  FiShare2,
+  FiCalendar,
   FiClock,
-  FiAlertCircle,
-  FiCheckCircle,
-  FiRefreshCw,
+  FiMoreHorizontal,
+  FiX,
+  FiMapPin,
+  FiShield,
+  FiLayers,
 } from "react-icons/fi";
 
-const PackageExpiryNotification = ({ endDate }) => {
-  const [isVisible, setIsVisible] = useState(true);
-  const [message, setMessage] = useState("");
-  const [severity, setSeverity] = useState("info");
-  const [isAnimating, setIsAnimating] = useState(false);
+const InfoItem = ({ icon: Icon, label, value, highlight = false }) => (
+  <div
+    className={`flex items-center gap-1 px-2 py-1 rounded-lg ${
+      highlight ? "bg-secondary/10 border border-secondary/20" : "bg-gray-50"
+    }`}
+  >
+    <Icon className="text-secondary text-sm flex-shrink-0" />
+    <span
+      className={`text-xs font-medium truncate ${
+        highlight ? "text-primary" : "text-third"
+      }`}
+    >
+      {value}
+    </span>
+    <span className="text-xs text-gray-500 flex-shrink-0">{label}</span>
+  </div>
+);
 
-  useEffect(() => {
-    const calculateExpiry = () => {
-      const expiryDate = new Date(endDate);
-      const today = new Date();
-      const diffTime = expiryDate - today;
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+const ActionButton = ({ icon: Icon, label, href }) => (
+  <Link
+    href={href}
+    passHref
+    className="bg-gradient-to-r from-secondary to-[#e8d4a6] text-primary px-2 py-1 rounded-lg font-medium hover:from-[#c9b085] hover:to-secondary transition-all flex items-center gap-1 shadow-sm hover:shadow-md text-xs"
+    aria-label={label}
+    title={label}
+  >
+    <Icon className="text-sm" />
+    <span className="inline">{label}</span>
+  </Link>
+);
 
-      if (diffDays <= 0) {
-        setMessage("Your package has expired!");
-        setSeverity("error");
-      } else if (diffDays <= 1) {
-        setMessage("Package expires today!");
-        setSeverity("error");
-      } else if (diffDays <= 3) {
-        setMessage(
-          `Package expires in ${diffDays} day${diffDays > 1 ? "s" : ""}`
-        );
-        setSeverity("critical");
-      } else if (diffDays <= 7) {
-        setMessage(`Package expires in ${diffDays} days`);
-        setSeverity("warning");
-      } else {
-        setIsVisible(false);
-      }
-    };
+const Header = ({
+  oneEvent,
+  sidebarVisible,
+  setSidebarVisible,
+  packageMB = 0,
+}) => {
+  const [showStatsModal, setShowStatsModal] = useState(false);
 
-    calculateExpiry();
-    const interval = setInterval(calculateExpiry, 24 * 60 * 60 * 1000);
+  const actions = useMemo(
+    () => [
+      {
+        icon: FiSettings,
+        label: "Settings",
+        value: "settings",
+        href: `/event/${oneEvent?._id}/settings`,
+      },
+      {
+        icon: FiShare2,
+        label: "Share",
+        value: "share",
+        href: `/common-qr?event_id=${oneEvent?._id}`,
+      },
+    ],
+    [oneEvent]
+  );
 
-    return () => clearInterval(interval);
-  }, [endDate]);
-
-  const handleClose = () => {
-    setIsAnimating(true);
-    setTimeout(() => {
-      setIsVisible(false);
-    }, 300);
+  // Format dates properly
+  const formatEventDate = (dateString) => {
+    if (!dateString) return "N/A";
+    const date = new Date(dateString);
+    return date.toLocaleDateString("en-US", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
   };
 
-  if (!isVisible) return null;
+  const stats = useMemo(
+    () => [
+      {
+        icon: FiFolder,
+        label: "Albums",
+        value: oneEvent?.totalAlbums || 0,
+        highlight: (oneEvent?.totalAlbums || 0) > 0,
+      },
+      {
+        icon: FiImage,
+        label: "Photos",
+        value: oneEvent?.totalPhotos || 0,
+        highlight: (oneEvent?.totalPhotos || 0) > 0,
+      },
+    ],
+    [oneEvent, packageMB]
+  );
 
-  const getBannerStyles = () => {
-    switch (severity) {
-      case "error":
-        return {
-          container: "bg-red-50 border-red-200",
-          icon: "text-red-600",
-          text: "text-red-800",
-          accent: "bg-red-500",
-          button: "text-red-500 hover:text-red-700 hover:bg-red-100",
-          progressBar: "bg-red-500",
-        };
-      case "critical":
-        return {
-          container: "bg-orange-50 border-orange-200",
-          icon: "text-orange-600",
-          text: "text-orange-800",
-          accent: "bg-orange-500",
-          button: "text-orange-500 hover:text-orange-700 hover:bg-orange-100",
-          progressBar: "bg-orange-500",
-        };
-      case "warning":
-        return {
-          container: "bg-yellow-50 border-yellow-200",
-          icon: "text-yellow-600",
-          text: "text-yellow-800",
-          accent: "bg-yellow-500",
-          button: "text-yellow-500 hover:text-yellow-700 hover:bg-yellow-100",
-          progressBar: "bg-yellow-500",
-        };
-      default:
-        return {
-          container: "bg-blue-50 border-blue-200",
-          icon: "text-blue-600",
-          text: "text-blue-800",
-          accent: "bg-blue-500",
-          button: "text-blue-500 hover:text-blue-700 hover:bg-blue-100",
-          progressBar: "bg-blue-500",
-        };
-    }
-  };
+  const eventDetails = useMemo(
+    () => [
+      {
+        icon: FiCalendar,
+        label: "Start",
+        value: formatEventDate(oneEvent?.eventStartDate),
+      },
+      {
+        icon: FiClock,
+        label: "End",
+        value: formatEventDate(oneEvent?.eventEndDate),
+      },
+      {
+        icon: FiMapPin,
+        label: "Location",
+        value: oneEvent?.location || "N/A",
+      },
+      {
+        icon: FiShield,
+        label: "PIN",
+        value: oneEvent?.accessPin || "N/A",
+      },
+    ],
+    [oneEvent]
+  );
 
-  const getIcon = () => {
-    switch (severity) {
-      case "error":
-        return <FiAlertCircle className="w-5 h-5" />;
-      case "critical":
-        return <FiAlertTriangle className="w-5 h-5" />;
-      case "warning":
-        return <FiClock className="w-5 h-5" />;
-      default:
-        return <FiCheckCircle className="w-5 h-5" />;
-    }
-  };
-
-  const getActionButton = () => {
-    if (severity === "error" || severity === "critical") {
-      return (
-        <button
-          className={`inline-flex items-center px-4 py-2 text-sm font-medium rounded-md transition-all duration-200 ${
-            severity === "error"
-              ? "bg-red-600 text-white hover:bg-red-700"
-              : "bg-orange-600 text-white hover:bg-orange-700"
-          }`}
-        >
-          <FiRefreshCw className="w-4 h-4 mr-2" />
-          Renew Package
-        </button>
-      );
-    }
-    return null;
-  };
-
-  const styles = getBannerStyles();
+  // Calculate storage percentage
+  const storagePercentage = useMemo(() => {
+    const used = oneEvent?.totalMBUsed || 0;
+    return Math.min((used / packageMB) * 100, 100);
+  }, [oneEvent?.totalMBUsed, packageMB]);
 
   return (
-    <div
-      className={`
-        ${styles.container}
-        ${
-          isAnimating
-            ? "animate-pulse opacity-50 scale-95"
-            : "animate-slideDown"
-        }
-        w-full border rounded-lg shadow-sm
-        transform transition-all duration-300 ease-out
-        relative overflow-hidden
-      `}
-    >
-      {/* Top accent bar */}
-      <div className={`${styles.accent} h-1 w-full`} />
+    <>
+      <header className="sticky top-0 z-20 bg-white/95 backdrop-blur-sm border-b border-gray-200/60 px-2 pb-2">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <button
+              onClick={() => setSidebarVisible(!sidebarVisible)}
+              className="xl:hidden flex items-center gap-2 flex-shrink-0 px-3 py-1.5 rounded-lg text-primary bg-gradient-to-r from-secondary/20 to-secondary/10 hover:from-secondary/30 hover:to-secondary/20 transition-all border border-secondary/30 hover:border-secondary/50"
+              aria-label={sidebarVisible ? "Hide sidebar" : "Show sidebar"}
+            >
+              <FiLayers className="text-base" />
+              <span className="text-sm font-medium">Albums</span>
+              <FiChevronLeft
+                className={`transition-transform duration-200 text-sm ${
+                  sidebarVisible ? "rotate-180" : ""
+                }`}
+              />
+            </button>
+            <div className="min-w-0 flex-1">
+              <h1 className="text-base font-semibold text-primary truncate">
+                {oneEvent?.eventName || "Event Name"}
+              </h1>
+              <p className="text-xs text-gray-500 line-clamp-1">
+                {oneEvent?.description || "No description available"}
+              </p>
+            </div>
+          </div>
 
-      {/* Main banner content */}
-      <div className="flex sm:flex-row flex-col items-center justify-between p-2.5 sm:p-4 gap-2">
-        {/* Left side - Icon and message */}
-        <div className="flex items-center space-x-3 flex-1">
-          <div className={`${styles.icon} flex-shrink-0`}>{getIcon()}</div>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setShowStatsModal(true)}
+              className="lg:hidden flex items-center gap-1 bg-gray-100 p-1.5 rounded-lg text-gray-700 hover:bg-secondary/10 hover:text-secondary transition-all"
+            >
+              <FiMoreHorizontal />
+              <span className="text-xs hidden sm:inline">Details</span>
+            </button>
 
-          <div className="flex-1">
-            <div className="flex items-center space-x-2">
-              <span className={`${styles.text} font-semibold text-xs sm:text-sm`}>
-                Package Status:
-              </span>
-              <span className={`${styles.text} text-xs sm:text-sm`}>{message}</span>
+            <div className="hidden lg:flex gap-2">
+              {stats.map((item) => (
+                <InfoItem key={item.label} {...item} />
+              ))}
             </div>
 
-            {/* Additional message based on severity */}
-            {(severity === "error" || severity === "critical") && (
-              <p className={`${styles.text} text-xs opacity-75 mt-1`}>
-                {severity === "error"
-                  ? "Your package has expired. Renew now to continue using all features."
-                  : "Your package is about to expire. Consider renewing to avoid service interruption."}
-              </p>
-            )}
-
-            {severity === "warning" && (
-              <p className={`${styles.text} text-xs opacity-75 mt-1`}>
-                Remember to renew your package before it expires.
-              </p>
-            )}
+            <div className="hidden sm:flex gap-1">
+              {actions.map((action) => (
+                <ActionButton key={action.value} {...action} />
+              ))}
+            </div>
           </div>
         </div>
+      </header>
 
-        {/* Right side - Action button and close button */}
-        <div className="flex items-center space-x-3 ml-4">
-          {getActionButton()}
+      {showStatsModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl w-full max-w-sm p-4 animate-in fade-in shadow-xl">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-semibold text-lg text-primary">
+                Event Details
+              </h3>
+              <button
+                onClick={() => setShowStatsModal(false)}
+                className="p-1 rounded-full hover:bg-gray-100 text-primary transition-colors"
+              >
+                <FiX />
+              </button>
+            </div>
 
-          <button
-            onClick={handleClose}
-            className={`
-              ${styles.button}
-              p-2 rounded-full transition-all duration-200
-              hover:rotate-90 transform flex-shrink-0
-            `}
-            aria-label="Close notification"
-          >
-            <FiX className="w-4 h-4" />
-          </button>
+            {/* Event Info */}
+            <div className="mb-4">
+              <h4 className="text-sm font-medium text-primary mb-2">
+                Event Information
+              </h4>
+              <div className="grid gap-2">
+                {eventDetails.map((item) => (
+                  <div
+                    key={item.label}
+                    className="flex items-center gap-2 bg-gray-50 p-2 rounded-lg"
+                  >
+                    <item.icon className="text-secondary text-base flex-shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <span className="text-xs text-gray-500 block">
+                        {item.label}
+                      </span>
+                      <span className="text-sm font-medium text-gray-700 truncate block">
+                        {item.value}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Statistics */}
+            <div className="mb-4">
+              <h4 className="text-sm font-medium text-primary mb-2">
+                Statistics
+              </h4>
+              <div className="grid gap-2">
+                {stats.map((item) => (
+                  <div
+                    key={item.label}
+                    className="flex items-center gap-2 bg-gray-50 p-2 rounded-lg"
+                  >
+                    <item.icon className="text-secondary text-base flex-shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <span className="text-xs text-gray-500 block">
+                        {item.label}
+                      </span>
+                      <span className="text-sm font-medium text-gray-700 truncate block">
+                        {item.value}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Storage Progress Bar */}
+              <div className="mt-2 bg-gray-200 rounded-full h-2">
+                <div
+                  className="bg-gradient-to-r from-secondary to-[#e8d4a6] h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${storagePercentage}%` }}
+                />
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                {storagePercentage.toFixed(1)}% of package storage used
+              </p>
+            </div>
+
+            {/* Actions */}
+            <div className="grid grid-cols-2 gap-2">
+              {actions.map((action) => (
+                <ActionButton key={action.value} {...action} />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
+
+export default Header;
+
+
+
+
+
+import { cx } from "@/src/utils";
+import React, { useState, useCallback, useMemo } from "react";
+import { FiHardDrive, FiImage, FiUpload } from "react-icons/fi";
+
+const UploadButton = ({ label, icon, className, onChange }) => (
+  <label className={`w-full sm:w-auto ${className}`}>
+    {icon}
+    <span>{label}</span>
+    <input
+      type="file"
+      multiple
+      accept="image/*"
+      onChange={onChange}
+      className="hidden"
+    />
+  </label>
+);
+
+const UploadSection = ({ currentAlbum, handleFileChange, maxImageSize }) => {
+  const [isDragging, setIsDragging] = useState(false);
+
+  const handleDragEvent = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDragIn = useCallback(
+    (e) => {
+      handleDragEvent(e);
+      if (e.dataTransfer.items?.length) setIsDragging(true);
+    },
+    [handleDragEvent]
+  );
+
+  const handleDragOut = handleDragEvent;
+
+  const handleDrop = useCallback(
+    (e) => {
+      handleDragEvent(e);
+      setIsDragging(false);
+      if (e.dataTransfer.files?.length) {
+        handleFileChange({ target: { files: e.dataTransfer.files } });
+      }
+    },
+    [handleDragEvent, handleFileChange]
+  );
+
+  const uploadButtons = useMemo(
+    () => [
+      {
+        label: "Select",
+        icon: <FiImage className="text-sm" />,
+        className:
+          "bg-primary text-white px-3 py-2 rounded-lg cursor-pointer hover:bg-opacity-90 text-sm flex items-center justify-center gap-1.5 transition shadow-sm hover:shadow",
+      },
+      {
+        label: "Drop Files",
+        icon: <FiUpload className="text-sm" />,
+        className:
+          "bg-gradient-to-r from-secondary to-[#e8d4a6] text-primary px-3 py-2 rounded-lg cursor-pointer hover:from-[#c9b085] hover:to-secondary text-sm font-medium flex items-center justify-center gap-1.5 transition shadow-sm hover:shadow",
+      },
+    ],
+    []
+  );
+
+  return (
+    <div className="relative bg-white rounded-lg shadow-sm transition-all mb-2">
+      {/* Album Header Section */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 px-3 py-1 border-t border-x border-gray-200 rounded-t">
+        <div>
+          <h2 className="text-lg font-bold text-primary">
+            {currentAlbum.albumName}
+          </h2>
+        </div>
+        <div className="flex gap-3 text-xs text-gray-600">
+          <div className="flex items-center gap-1">
+            <FiImage className="text-secondary text-sm" />
+            {currentAlbum.totalImages || 0} photos
+          </div>
+          <div className="flex items-center gap-1">
+            <FiHardDrive className="text-secondary text-sm" />
+            {currentAlbum?.totalMBUsed.toFixed(2)} MB
+          </div>
         </div>
       </div>
 
-      {/* Progress bar at bottom */}
-      <div className="h-1 bg-gray-200">
-        <div
-          className={`h-full transition-all duration-500 ${styles.progressBar}`}
-          style={{
-            width:
-              severity === "error"
-                ? "100%"
-                : severity === "critical"
-                ? "85%"
-                : severity === "warning"
-                ? "60%"
-                : "30%",
-          }}
-        />
+      <div
+        onDragEnter={handleDragIn}
+        onDragLeave={handleDragOut}
+        onDragOver={handleDragEvent}
+        onDrop={handleDrop}
+        className={cx(
+          "p-3 border-2 border-dashed rounded-b-lg relative",
+          isDragging
+            ? "border-secondary bg-[#fff9e6]"
+            : "border-gray-200 hover:border-secondary"
+        )}
+      >
+        {/* Upload Section */}
+        <div className="mb-2 flex justify-center  items-center gap-2 w-full sm:w-auto">
+          {uploadButtons.map((btn, idx) => (
+            <UploadButton key={idx} {...btn} onChange={handleFileChange} />
+          ))}
+        </div>
+
+        {isDragging && (
+          <div className="absolute inset-0 bg-secondary/10 backdrop-blur-[2px] rounded-lg flex items-center justify-center">
+            <div className="text-center p-3">
+              <FiUpload size={20} className="mx-auto mb-1 text-primary" />
+              <p className="text-primary font-medium text-sm">
+                Drop files here
+              </p>
+            </div>
+          </div>
+        )}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-1 text-xs text-gray-500">
+          <p>JPG, PNG, JPEG supported</p>
+          <p className="text-red-500 font-medium">
+            *Select files or drag and drop. You can upload up to 1000 images at
+            once.*
+          </p>
+          <p>Max: {maxImageSize}MB per image</p>
+        </div>
       </div>
     </div>
   );
 };
 
-export default PackageExpiryNotification;
-
-
+export default UploadSection;
 
 
 
