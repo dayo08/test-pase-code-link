@@ -1,824 +1,1018 @@
-"use client";
-import { useRootData } from "@/src/context/rootContext";
-import { fetchDashboardCounts } from "@/src/redux/features/dashboard/dashboardThunks";
+import axios from "axios";
+import pLimit from "p-limit";
 import {
-  cancelPaymentAttempt,
-  initiateUpgrade,
-  verifyUpgrade,
-} from "@/src/redux/features/package/packageThunks";
-import Link from "next/link";
-import Script from "next/script";
-import React, { useState, useEffect } from "react";
-import toast from "react-hot-toast";
-import {
-  FaCamera,
-  FaImages,
-  FaFolderOpen,
-  FaCalendarAlt,
-  FaHdd,
-  FaBox,
-  FaCrown,
-  FaArchive,
-  FaChartLine,
-  FaRocket,
-  FaStar,
-  FaChevronRight,
-  FaFolder,
-  FaEye,
-  FaExclamationTriangle,
-  FaArrowUp,
-  FaSync,
-  FaGlobe,
-} from "react-icons/fa";
-import { Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
+  B2SmartPresignedUrl,
+  B2CompleteMultipart,
+  B2AbortMultipart,
+  failedDeleteImagesFromB2,
+} from "../redux/features/album/albumThunks";
+import { realSpeedDetector } from "./networkSpeedDetector";
 
-// Skeleton Components
-const Skeleton = ({ className = "h-4 bg-gray-200 rounded animate-pulse" }) => (
-  <div className={className} />
-);
+const ORPHAN_STORAGE_KEY = "B2_orphan_files";
 
-const SkeletonCard = () => (
-  <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-    <div className="flex items-center space-x-3">
-      <Skeleton className="w-12 h-12 bg-gray-200 rounded-lg" />
-      <div className="space-y-2">
-        <Skeleton className="w-24" />
-        <Skeleton className="w-16 h-8" />
-        <Skeleton className="w-20 h-3" />
-      </div>
-    </div>
-  </div>
-);
-
-// Utility Components
-const StatCard = ({
-  icon: Icon,
-  title,
-  value,
-  subtitle,
-  color = "#343148",
-}) => (
-  <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-2 sm:p-4 hover:shadow-md hover:border-gray-200 transition-all cursor-pointer">
-    <div className="flex flex-col xs:flex-row xs:items-center xs:space-x-3">
-      <div
-        className="p-2 rounded-lg mb-2 xs:mb-0 self-center xs:self-auto"
-        style={{ backgroundColor: `${color}20` }}
-      >
-        <Icon className="w-4 h-4 md:w-5 md:h-5" style={{ color }} />
-      </div>
-      <div className="text-center xs:text-left">
-        <p className="text-xs sm:text-sm font-medium text-gray-600 truncate">
-          {title}
-        </p>
-        <p className="text-xs md:text-lg font-bold text-gray-900 truncate">
-          {value}
-        </p>
-        {subtitle && (
-          <p className="text-xs text-gray-500 truncate">{subtitle}</p>
-        )}
-      </div>
-    </div>
-  </div>
-);
-
-const ProgressBar = ({ current, total, label, unit = "MB", percentage }) => {
-  const percent = percentage ?? (current / total) * 100;
-  const getColor = (p) => (p > 90 ? "#ef4444" : p > 70 ? "#f59e0b" : "#343148");
-
-  return (
-    <div className="space-y-2">
-      <div className="flex justify-between items-center">
-        <span className="text-sm font-medium text-gray-700 truncate">
-          {label}
-        </span>
-        <span className="text-xs text-gray-500 whitespace-nowrap">
-          {current?.toLocaleString()}/{total?.toLocaleString()} {unit}
-        </span>
-      </div>
-      <div className="w-full bg-gray-200 rounded-full h-2.5">
-        <div
-          className="h-2.5 rounded-full transition-all duration-500"
-          style={{
-            width: `${Math.min(percent, 100)}%`,
-            backgroundColor: getColor(percent),
-          }}
-        />
-      </div>
-      <div className="flex justify-between text-xs">
-        <span className="text-gray-500">{percent.toFixed(1)}% used</span>
-        {percent > 85 && (
-          <span className="text-red-600 font-medium">Nearly full</span>
-        )}
-      </div>
-    </div>
-  );
+// 🔥 FILE SIZE THRESHOLDS (in MB)
+const UPLOAD_THRESHOLDS = {
+  DIRECT_MAX: 10, // 0-10MB: Direct PUT
+  CHUNKED_MAX: 30, // 10-30MB: 5MB chunks
+  MULTIPART_MAX: 60, // 30-60MB: 10MB chunks
 };
 
-const StatusBadge = ({ status }) => {
-  const isActive = status === "active";
-  return (
-    <span
-      className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
-        isActive ? "text-white" : "bg-gray-100 text-gray-800"
-      }`}
-      style={{ backgroundColor: isActive ? "#343148" : undefined }}
-    >
-      {isActive ? (
-        <FaCalendarAlt className="w-3 h-3 mr-1.5" />
-      ) : (
-        <FaArchive className="w-3 h-3 mr-1.5" />
-      )}
-      <span className="capitalize">{status}</span>
-    </span>
-  );
-};
+/**
+ * 🔥 SMART FILE UPLOADER
+ * Automatically chooses best upload strategy based on file size
+ */
+class SmartFileUploader {
+  constructor(file, path, type, progressCallback) {
+    this.file = file;
+    this.path = path;
+    this.type = type;
+    this.progressCallback = progressCallback;
+    this.fileSizeMB = file.size / (1024 * 1024);
+    this.uploadedBytes = 0;
+    this.lastReportedBytes = 0;
+    this.isCancelled = false;
+  }
 
-const UpgradeButton = () => {
-  return (
-    <div className="bg-gradient-to-r from-orange-50 to-red-50 border border-orange-200 rounded-xl p-3 sm:p-4 mb-4">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div className="flex items-center space-x-3">
-          <div className="p-2 bg-orange-100 rounded-lg">
-            <FaRocket className="w-4 h-4 sm:w-5 sm:h-5 text-orange-600" />
-          </div>
-          <div>
-            <h3 className="text-sm font-semibold text-orange-800">
-              Usage Alert
-            </h3>
-            <p className="text-xs sm:text-sm text-orange-700">
-              You&apos;re reaching your plan limits. Upgrade for more storage
-              and features.
-            </p>
-          </div>
-        </div>
-        <Link
-          href="/upgrade-plan"
-          className="bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white px-3 py-2 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-all transform hover:scale-105 shadow-sm text-center"
-        >
-          Upgrade Now
-        </Link>
-      </div>
-    </div>
-  );
-};
-
-const EventCard = ({ event }) => (
-  <Link href={`/event/${event._id}`} className="">
-    <div className="mt-2 bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
-      <div className="flex justify-between items-start mb-3">
-        <h4 className="font-medium text-gray-900 text-sm">{event.name}</h4>
-        <FaChevronRight className="w-4 h-4 text-gray-400" />
-      </div>
-      <div className="text-sm text-gray-500 mb-3">
-        {new Date(event.date).toLocaleDateString()}
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div className="flex items-center text-xs text-gray-600">
-          <FaFolder
-            className="w-3.5 h-3.5 mr-1.5"
-            style={{ color: "#343148" }}
-          />
-          <span>{event.albums} albums</span>
-        </div>
-        <div className="flex items-center text-xs text-gray-600">
-          <FaImages
-            className="w-3.5 h-3.5 mr-1.5"
-            style={{ color: "#d7c39d" }}
-          />
-          <span>{event.photos} photos</span>
-        </div>
-        <div className="flex items-center text-xs text-gray-600">
-          <FaHdd className="w-3.5 h-3.5 mr-1.5" style={{ color: "#343148" }} />
-          <span>{event.mbUsed} MB</span>
-        </div>
-        <div className="flex justify-end">
-          <StatusBadge status={event.status} />
-        </div>
-      </div>
-    </div>
-  </Link>
-);
-
-const PackageInfo = ({ packageData }) => {
-  const { user } = useRootData();
-  const [loadingAction, setLoadingAction] = useState("renew"); // 'renew' or 'upgrade'
-
-  const now = new Date();
-  const isExpired = new Date(packageData.endDate) < now;
-  const isTrial = packageData.isTrial;
-  const isActive = packageData.status === "active" && !isExpired;
-  const isPaidExpired = !isTrial && isExpired;
-
-  // Handle Renewal (same package)
-  const handleRenewal = async () => {
+  async upload() {
     try {
-      setLoadingAction("renew");
+      // 🔥 STRATEGY 1: Direct Upload (0-10MB)
+      if (this.fileSizeMB <= UPLOAD_THRESHOLDS.DIRECT_MAX) {
+        return await this.directUpload();
+      }
 
-      // 1. Initiate Renewal
-      const data = await initiateUpgrade({
-        newPackageId: packageData._id,
-        actionType: "renew",
+      // 🔥 STRATEGY 2 & 3: Multipart Upload (10MB+)
+      return await this.multipartUpload();
+    } catch (error) {
+      console.error(`Upload failed for ${this.path}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Direct PUT upload for small files (<10MB)
+   */
+  async directUpload() {
+    try {
+      // Get presigned URL
+      const response = await B2SmartPresignedUrl({
+        fileType: this.type,
+        folderPath: this.path,
+        fileSize: this.file.size,
       });
 
-      if (!data?.orderId) {
-        throw new Error("Failed to create renewal order");
+      if (!response?.success || !response?.uploadUrl) {
+        throw new Error("Failed to get upload URL");
       }
 
-      // 2. Open Razorpay Checkout
-      const options = {
-        key: data.key,
-        amount: data.amount * 100,
-        currency: data.currency,
-        name: "Find My Photos",
-        description: `Renewal: ${packageData.packageName}`,
-        order_id: data.orderId,
-        image: "/assets/logo.png",
-        handler: async function (response) {
-          try {
-            // 3. Verify Payment
-            await verifyUpgrade({
-              razorpay_payment_id: response.razorpay_payment_id,
-              razorpay_order_id: response.razorpay_order_id,
-              razorpay_signature: response.razorpay_signature,
-            });
+      const { uploadUrl } = response;
 
-            toast.success("Package renewed successfully!");
-          } catch (error) {
-            console.error("Payment verification failed:", error);
-            toast.error("Payment verification failed. Please contact support.");
+      // Upload with progress tracking
+      await axios.put(uploadUrl, this.file, {
+        headers: { "Content-Type": this.type },
+        timeout: 5 * 60 * 1000, // 5 minutes
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity,
+        onUploadProgress: (e) => {
+          if (this.progressCallback && !this.isCancelled) {
+            const progress = Math.round((e.loaded * 100) / e.total);
+            const bytesLoaded = e.loaded - this.lastReportedBytes;
+            this.lastReportedBytes = e.loaded;
+            this.progressCallback(progress, bytesLoaded);
           }
         },
-        prefill: {
-          name: user?.fullName || "Customer Name",
-          email: user?.email,
-          contact: user?.countryDialCode + user?.phoneNumber,
-        },
-        theme: { color: "#343148" },
-        modal: {
-          ondismiss: async function () {
-            await cancelPaymentAttempt({ razorpayOrderId: options.order_id });
-            setLoadingAction(null);
+      });
+
+      return { success: true, method: "direct", path: this.path };
+    } catch (error) {
+      console.error(`❌ Direct upload failed: ${this.path}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Multipart upload for large files (>10MB)
+   */
+  async multipartUpload() {
+    let uploadId = null;
+    const uploadedParts = [];
+
+    try {
+      // 🔥 STEP 1: Initialize multipart upload
+      const response = await B2SmartPresignedUrl({
+        fileType: this.type,
+        folderPath: this.path,
+        fileSize: this.file.size,
+      });
+
+      if (!response?.success || !response?.uploadId) {
+        throw new Error("Failed to initialize multipart upload");
+      }
+
+      const { uploadId: id, partUrls, chunkSize, totalParts } = response;
+      uploadId = id;
+
+      // 🔥 STEP 2: Upload parts sequentially (with retry)
+      for (let i = 0; i < partUrls.length; i++) {
+        if (this.isCancelled) {
+          throw new Error("Upload cancelled by user");
+        }
+
+        const { partNumber, uploadUrl } = partUrls[i];
+        const start = (partNumber - 1) * chunkSize;
+        const end = Math.min(start + chunkSize, this.file.size);
+        const chunk = this.file.slice(start, end);
+
+        // Upload part with retry
+        const etag = await this.uploadPart(
+          uploadUrl,
+          chunk,
+          partNumber,
+          totalParts,
+          chunkSize,
+        );
+
+        uploadedParts.push({ partNumber, etag });
+      }
+
+      // 🔥 STEP 3: Complete multipart upload
+      const completeResponse = await B2CompleteMultipart({
+        folderPath: this.path,
+        uploadId,
+        parts: uploadedParts,
+      });
+
+      if (!completeResponse?.success) {
+        throw new Error("Failed to complete multipart upload");
+      }
+
+      return {
+        success: true,
+        method: "multipart",
+        parts: totalParts,
+        path: this.path,
+      };
+    } catch (error) {
+      console.error(`❌ Multipart upload failed: ${this.path}`, error);
+
+      // 🔥 Cleanup: Abort multipart upload
+      if (uploadId) {
+        try {
+          await B2AbortMultipart({
+            folderPath: this.path,
+            uploadId,
+          });
+        } catch (abortError) {
+          console.error("Failed to abort multipart:", abortError);
+        }
+      }
+
+      throw error;
+    }
+  }
+
+  /**
+   * Upload single part with retry logic
+   */
+  async uploadPart(uploadUrl, chunk, partNumber, totalParts, chunkSize) {
+    const maxRetries = 3;
+    let lastError;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const partStartBytes = this.uploadedBytes;
+
+        const response = await axios.put(uploadUrl, chunk, {
+          headers: { "Content-Type": "application/octet-stream" },
+          timeout: 5 * 60 * 1000, // 5 minutes per part
+          maxContentLength: Infinity,
+          maxBodyLength: Infinity,
+          onUploadProgress: (e) => {
+            if (this.progressCallback && !this.isCancelled) {
+              // Calculate overall progress
+              const partProgress = e.loaded / chunk.size;
+              const overallProgress =
+                ((partNumber - 1 + partProgress) / totalParts) * 100;
+
+              const currentBytes = partStartBytes + e.loaded;
+              const bytesLoaded = currentBytes - this.lastReportedBytes;
+
+              if (bytesLoaded > 0) {
+                this.lastReportedBytes = currentBytes;
+                this.progressCallback(Math.round(overallProgress), bytesLoaded);
+              }
+            }
           },
-        },
+        });
+
+        // Update total uploaded bytes for this part
+        this.uploadedBytes += chunk.size;
+
+        // Extract ETag from response headers
+        const etag = response.headers.etag?.replace(/"/g, "");
+
+        if (!etag) {
+          throw new Error(`No ETag in response for part ${partNumber}`);
+        }
+
+        return etag;
+      } catch (error) {
+        lastError = error;
+
+        if (attempt < maxRetries) {
+          const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
+          console.warn(
+            `⚠️ Retry part ${partNumber} (attempt ${attempt}/${maxRetries}) in ${delay}ms`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+      }
+    }
+
+    throw lastError;
+  }
+
+  cancel() {
+    this.isCancelled = true;
+  }
+}
+
+// 🔥 ENHANCED Worker Pool with proper worker tracking
+class WorkerPool {
+  constructor(workerScript, poolSize = navigator.hardwareConcurrency || 4) {
+    this.workers = [];
+    this.queue = [];
+    this.activeJobs = new Map();
+    this.jobIdCounter = 0;
+    this.processingTimeout = 60000;
+
+    for (let i = 0; i < poolSize; i++) {
+      const worker = new Worker(workerScript);
+      worker.onmessage = (e) => this.handleMessage(e, i);
+      worker.onerror = (e) => this.handleError(e, i);
+
+      this.workers.push({
+        worker,
+        busy: false,
+        id: i,
+      });
+    }
+  }
+
+  processImage(file, hash, createThumbnail = true, originalImg = false) {
+    return new Promise((resolve, reject) => {
+      const availableWorker = this.workers.find((w) => !w.busy);
+      const jobId = this.jobIdCounter++;
+
+      const job = {
+        resolve,
+        reject,
+        hash,
+        jobId,
+        fileName: file.name,
+        fileSize: (file.size / 1024 / 1024).toFixed(2) + "MB",
+        timeoutId: null,
       };
 
-      const rzp = new window.Razorpay(options);
-      rzp.open();
-    } catch (error) {
-      console.error("Renewal failed:", error);
-      toast.error(error.message || "Failed to initiate renewal");
-      setLoadingAction(null);
-    }
-  };
-
-  return (
-    <>
-      <Script
-        id="razorpay-script"
-        src="https://checkout.razorpay.com/v1/checkout.js"
-        strategy="afterInteractive"
-      />
-      <div className="bg-gradient-to-r from-gray-50 to-amber-50 rounded-xl p-3 sm:p-4 mb-4 border border-gray-200">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          {/* Package Info */}
-          <div className="flex items-center space-x-3 sm:space-x-4">
-            <div className="p-2 sm:p-3 bg-white rounded-lg shadow-sm">
-              <FaCrown
-                className={`w-5 h-5 sm:w-6 sm:h-6 ${
-                  isExpired ? "text-gray-400" : "text-amber-500"
-                }`}
-              />
-            </div>
-            <div>
-              <div className="flex items-center justify-between sm:block">
-                <h2 className="text-lg sm:text-xl font-bold text-gray-900">
-                  {packageData.packageName}
-                </h2>
-              </div>
-              <div className="sm:block hidden">
-                <p className="text-sm text-gray-600">
-                  {packageData.validityInDays} days validity •
-                  {isTrial ? " Trial Plan" : " Premium Plan"}
-                </p>
-                <p className="text-xs text-gray-500">
-                  {isExpired ? "Expired on" : "Active until"}{" "}
-                  {new Date(packageData.endDate).toLocaleDateString()}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Action Buttons */}
-          <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
-            {/* CASE 1: Trial Active - Upgrade Only */}
-            {isTrial && !isExpired && (
-              <Link
-                href="/upgrade-plan"
-                className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-4 py-2.5 rounded-lg font-medium transition-all transform hover:scale-105 shadow-lg flex items-center justify-center space-x-2 text-sm"
-              >
-                <FaStar className="w-4 h-4" />
-                <span>Upgrade to Paid</span>
-              </Link>
-            )}
-
-            {/* CASE 2: Trial Expired - Upgrade Only */}
-            {isTrial && isExpired && (
-              <Link
-                href="/upgrade-plan"
-                className="bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-700 hover:to-red-700 text-white px-4 py-2.5 rounded-lg font-medium transition-all transform hover:scale-105 shadow-lg flex items-center justify-center space-x-2 text-sm"
-              >
-                <FaExclamationTriangle className="w-4 h-4" />
-                <span>Activate Paid Plan</span>
-              </Link>
-            )}
-
-            {/* CASE 3: Paid Active - Upgrade Only */}
-            {!isTrial && isActive && (
-              <Link
-                href="/upgrade-plan"
-                className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-4 py-2.5 rounded-lg font-medium transition-all transform hover:scale-105 shadow-lg flex items-center justify-center space-x-2 text-sm"
-              >
-                <FaArrowUp className="w-4 h-4" />
-                <span>Upgrade Plan</span>
-              </Link>
-            )}
-
-            {/* CASE 4: Paid Expired - Renew AND Upgrade */}
-            {isPaidExpired && (
-              <>
-                {/* ✅ FIXED: Renew Button with dynamic  */}
-                <button
-                  onClick={handleRenewal}
-                  disabled={loadingAction === "renew"}
-                  className="bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white px-4 py-2.5 rounded-lg font-medium transition-all transform hover:scale-105 shadow-lg flex items-center justify-center space-x-2 text-sm disabled:opacity-70 disabled:cursor-not-allowed"
-                >
-                  {loadingAction === "renew" ? (
-                    <>
-                      <svg
-                        className="animate-spin h-4 w-4"
-                        xmlns="http://www.w3.org/2000/svg"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                      >
-                        <circle
-                          className="opacity-25"
-                          cx="12"
-                          cy="12"
-                          r="10"
-                          stroke="currentColor"
-                          strokeWidth="4"
-                        ></circle>
-                        <path
-                          className="opacity-75"
-                          fill="currentColor"
-                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                        ></path>
-                      </svg>
-                      <span>Processing...</span>
-                    </>
-                  ) : (
-                    <>
-                      <FaSync className="w-4 h-4" />
-                      <span>Renew Plan</span>
-                    </>
-                  )}
-                </button>
-
-                {/* Upgrade Button - Navigate to upgrade page */}
-                <Link
-                  href="/upgrade-plan?action=upgrade"
-                  className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-4 py-2.5 rounded-lg font-medium transition-all transform hover:scale-105 shadow-lg flex items-center justify-center space-x-2 text-sm"
-                >
-                  <FaArrowUp className="w-4 h-4" />
-                  <span>Upgrade Plan</span>
-                </Link>
-              </>
-            )}
-          </div>
-
-          {/* Status Badge */}
-          <div className="flex items-center space-x-2">
-            <span
-              className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                isExpired
-                  ? "bg-red-100 text-red-800"
-                  : isTrial
-                  ? "bg-blue-100 text-blue-800"
-                  : "bg-green-100 text-green-800"
-              }`}
-            >
-              {isExpired ? "Expired" : isTrial ? "Trial" : "Active"}
-            </span>
-            {!isExpired && (
-              <p className="text-xs text-gray-500">
-                {packageData.daysRemaining} days left
-              </p>
-            )}
-          </div>
-        </div>
-
-        {/* ✅ FIXED: Expiry Warning with dynamic */}
-        {isPaidExpired && (
-          <div className="mt-3 p-3 bg-orange-50 border border-orange-200 rounded-lg">
-            <div className="flex items-start space-x-2">
-              <FaExclamationTriangle className="w-4 h-4 text-orange-600 mt-0.5 flex-shrink-0" />
-              <div>
-                <p className="text-sm font-medium text-orange-900">
-                  Your plan has expired
-                </p>
-                <p className="text-xs text-orange-700 mt-1">
-                  Click &quot;Renew Plan&quot; to continue with{" "}
-                  {packageData.packageName} for &quot;Upgrade Plan&quot; to
-                  explore other options.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    </>
-  );
-};
-
-const Dashboard = () => {
-  const [dashboardData, setDashboardData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState("all");
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    const loadDashboardData = async () => {
-      try {
-        setLoading(true);
-        const data = await fetchDashboardCounts();
-        setDashboardData(data);
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
+      if (availableWorker) {
+        this.startJob(
+          availableWorker,
+          file,
+          hash,
+          createThumbnail,
+          originalImg,
+          job,
+        );
+      } else {
+        this.queue.push({ file, hash, createThumbnail, originalImg, ...job });
       }
+    });
+  }
+
+  startJob(worker, file, hash, createThumbnail, originalImg, job) {
+    worker.busy = true;
+    this.activeJobs.set(worker.id, job);
+
+    // Add timeout to prevent stuck jobs
+    job.timeoutId = setTimeout(() => {
+      console.error(`⚠️ Job timeout: ${job.fileName} (${job.fileSize})`);
+      this.handleJobTimeout(worker.id);
+    }, this.processingTimeout);
+
+    worker.worker.postMessage({
+      file,
+      hash,
+      createThumbnail,
+      originalImg,
+      jobId: job.jobId,
+    });
+  }
+
+  handleMessage(e, workerId) {
+    const { success, result, error, hash, jobId } = e.data;
+    const worker = this.workers[workerId];
+    const job = this.activeJobs.get(workerId);
+
+    if (!job || !worker) {
+      console.error(`⚠️ Worker ${workerId} returned orphan result`);
+      return;
+    }
+
+    // Clear timeout
+    if (job.timeoutId) {
+      clearTimeout(job.timeoutId);
+    }
+
+    // Verify hash
+    if (job.hash !== hash) {
+      console.error(`❌ Hash mismatch! Expected ${job.hash}, got ${hash}`);
+      job.reject(new Error(`Hash mismatch for ${job.fileName}`));
+      this.freeWorker(workerId);
+      return;
+    }
+
+    worker.busy = false;
+    this.activeJobs.delete(workerId);
+
+    if (success) {
+      job.resolve(result);
+    } else {
+      job.reject(new Error(error));
+    }
+
+    // Process next in queue
+    this.processNextInQueue(workerId);
+  }
+
+  handleError(error, workerId) {
+    console.error(`❌ Worker ${workerId} error:`, error);
+    const job = this.activeJobs.get(workerId);
+
+    if (job) {
+      if (job.timeoutId) clearTimeout(job.timeoutId);
+      job.reject(new Error(`Worker error: ${error.message}`));
+      this.freeWorker(workerId);
+    }
+  }
+
+  handleJobTimeout(workerId) {
+    const job = this.activeJobs.get(workerId);
+    if (job) {
+      job.reject(new Error(`Processing timeout for ${job.fileName}`));
+      this.freeWorker(workerId);
+    }
+  }
+
+  freeWorker(workerId) {
+    const worker = this.workers[workerId];
+    if (worker) {
+      worker.busy = false;
+      this.activeJobs.delete(workerId);
+      this.processNextInQueue(workerId);
+    }
+  }
+
+  processNextInQueue(workerId) {
+    if (this.queue.length > 0) {
+      const nextJob = this.queue.shift();
+      const worker = this.workers[workerId];
+
+      if (worker && !worker.busy) {
+        this.startJob(
+          worker,
+          nextJob.file,
+          nextJob.hash,
+          nextJob.createThumbnail,
+          nextJob.originalImg,
+          nextJob,
+        );
+      }
+    }
+  }
+
+  async waitForCompletion() {
+    return new Promise((resolve) => {
+      const checkInterval = setInterval(() => {
+        const allFree = this.workers.every((w) => !w.busy);
+        const queueEmpty = this.queue.length === 0;
+
+        if (allFree && queueEmpty) {
+          clearInterval(checkInterval);
+          resolve();
+        }
+      }, 100);
+    });
+  }
+
+  terminate() {
+    this.workers.forEach((w) => {
+      w.worker.terminate();
+    });
+    this.workers = [];
+    this.queue = [];
+    this.activeJobs.forEach((job) => {
+      if (job.timeoutId) clearTimeout(job.timeoutId);
+    });
+    this.activeJobs.clear();
+  }
+}
+
+const workerPool = new WorkerPool("/workers/imageProcessor.js");
+
+// 🔥 Enhanced Retry Handler
+class RetryHandler {
+  constructor() {
+    this.retryDelays = [500, 1000, 2000, 5000];
+  }
+
+  async executeWithRetry(fn, maxAttempts, context = {}) {
+    let lastError;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await fn(attempt);
+      } catch (error) {
+        lastError = error;
+
+        if (!this.isRetryableError(error) || attempt >= maxAttempts) {
+          throw error;
+        }
+
+        const delay =
+          this.retryDelays[Math.min(attempt - 1, this.retryDelays.length - 1)];
+        console.warn(
+          `⚠️ Retry ${attempt}/${maxAttempts}: ${context.fileName} (${delay}ms)`,
+        );
+        await this.sleep(delay);
+      }
+    }
+
+    throw lastError;
+  }
+
+  isRetryableError(error) {
+    const retryableStatuses = [408, 429, 500, 502, 503, 504];
+    const retryableMessages = [
+      "timeout",
+      "network",
+      "ECONNRESET",
+      "ETIMEDOUT",
+      "ENOTFOUND",
+      "Bad Gateway",
+      "Gateway Timeout",
+      "Service Unavailable",
+      "ERR_NETWORK",
+      "ERR_FAILED",
+    ];
+
+    if (error.response && retryableStatuses.includes(error.response.status)) {
+      return true;
+    }
+
+    const errorMessage = error.message?.toLowerCase() || "";
+    return retryableMessages.some((msg) =>
+      errorMessage.includes(msg.toLowerCase()),
+    );
+  }
+
+  sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+}
+
+const retryHandler = new RetryHandler();
+
+// 🔥 MAIN UPLOADER CLASS
+class SimpleUploader {
+  constructor() {
+    // Adaptive batch sizes based on file size
+    this.batchSize = 20;
+    this.concurrentUploads = 12;
+    this.isCancelled = false;
+    this.pendingPaths = new Set();
+    this.failedPaths = new Set();
+
+    this.uploadStats = {
+      totalBytes: 0,
+      uploadedBytes: 0,
+      startTime: null,
+      lastBytes: 0,
+      lastTime: null,
+      lastSpeedUpdate: null,
     };
-    loadDashboardData();
-  }, []);
 
-  if (loading) {
-    return (
-      <div className="h-full overflow-auto">
-        <div className="mb-8">
-          <Skeleton className="h-8 w-64 mb-2" />
-          <Skeleton className="h-4 w-96" />
-        </div>
-        <div className="bg-gray-100 rounded-xl p-6 mb-8 border">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <Skeleton className="w-12 h-12 rounded-lg" />
-              <div className="space-y-2">
-                <Skeleton className="h-6 w-32" />
-                <Skeleton className="h-4 w-48" />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Skeleton className="h-8 w-20" />
-              <Skeleton className="h-4 w-24" />
-            </div>
-          </div>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <SkeletonCard key={i} />
-          ))}
-        </div>
-      </div>
+    this.loadOrphanedFiles();
+  }
+
+  saveOrphanToStorage(path) {
+    try {
+      const existing = JSON.parse(
+        localStorage.getItem(ORPHAN_STORAGE_KEY) || "[]",
+      );
+      if (!existing.includes(path)) {
+        existing.push(path);
+        localStorage.setItem(ORPHAN_STORAGE_KEY, JSON.stringify(existing));
+      }
+    } catch (e) {}
+  }
+
+  removeOrphanFromStorage(path) {
+    try {
+      const existing = JSON.parse(
+        localStorage.getItem(ORPHAN_STORAGE_KEY) || "[]",
+      );
+      const filtered = existing.filter((p) => p !== path);
+      localStorage.setItem(ORPHAN_STORAGE_KEY, JSON.stringify(filtered));
+    } catch (e) {}
+  }
+
+  loadOrphanedFiles() {
+    try {
+      const orphans = JSON.parse(
+        localStorage.getItem(ORPHAN_STORAGE_KEY) || "[]",
+      );
+      if (orphans.length > 0) {
+        orphans.forEach((path) => this.pendingPaths.add(path));
+        this.cleanupOrphaned();
+      }
+    } catch (e) {}
+  }
+
+  // Adaptive batch size based on file sizes
+  calculateOptimalBatchSize(files) {
+    const avgSizeMB =
+      files.reduce((sum, f) => sum + f.size, 0) / files.length / 1024 / 1024;
+
+    if (avgSizeMB > 30) return 5; // Large files
+    if (avgSizeMB > 10) return 10; // Medium files
+    return 20; // Small files
+  }
+
+  calculateOptimalConcurrency(files) {
+    const avgSizeMB =
+      files.reduce((sum, f) => sum + f.size, 0) / files.length / 1024 / 1024;
+
+    if (avgSizeMB > 30) return 4; // Large files
+    if (avgSizeMB > 10) return 8; // Medium files
+    return 12; // Small files
+  }
+
+  async uploadFiles(files, callbacks) {
+    const {
+      setUploadTracker,
+      uploadImages,
+      user,
+      uploadEventId,
+      uploadAlbumId,
+      originalImg,
+      completeUpload,
+    } = callbacks;
+
+    this.isCancelled = false;
+    const results = { successCount: 0, failedCount: 0 };
+
+    // Start network monitoring
+    realSpeedDetector.startMonitoring();
+
+    // Calculate optimal settings based on file sizes
+    this.batchSize = this.calculateOptimalBatchSize(files.map((f) => f.file));
+    this.concurrentUploads = this.calculateOptimalConcurrency(
+      files.map((f) => f.file),
+    );
+
+    const totalSizeMB = files.reduce((sum, f) => sum + (f.size || 0.5), 0);
+
+    this.uploadStats = {
+      totalBytes: totalSizeMB * 1048576,
+      uploadedBytes: 0,
+      startTime: Date.now(),
+      lastBytes: 0,
+      lastTime: Date.now(),
+      lastSpeedUpdate: Date.now(),
+    };
+
+    try {
+      for (let i = 0; i < files.length; i += this.batchSize) {
+        if (this.isCancelled) {
+          console.log("❌ Upload cancelled by user");
+          break;
+        }
+
+        const batchNum = Math.floor(i / this.batchSize) + 1;
+        const batch = files.slice(i, i + this.batchSize);
+
+        // STEP 1: Process images
+        const processedBatch = await this.processBatchImages(
+          batch,
+          setUploadTracker,
+          originalImg,
+        );
+
+        // Wait for all processing to complete
+        await workerPool.waitForCompletion();
+
+        // STEP 2: Upload files
+        const retryAttempts = realSpeedDetector.currentSpeed.retryAttempts || 3;
+        const uploadedBatch = await this.uploadBatch(
+          processedBatch,
+          { user, uploadEventId, uploadAlbumId, originalImg, retryAttempts },
+          setUploadTracker,
+        );
+
+        // STEP 3: Save to database
+        const successfulFiles = uploadedBatch.filter((r) => r.success);
+        if (successfulFiles.length > 0) {
+          try {
+            await uploadImages(
+              uploadAlbumId,
+              successfulFiles.map((r) => r.metadata),
+            );
+            results.successCount += successfulFiles.length;
+
+            // Cleanup orphan tracking
+            successfulFiles.forEach((r) => {
+              r.uploadedPaths.forEach((path) => {
+                this.pendingPaths.delete(path);
+                this.removeOrphanFromStorage(path);
+              });
+            });
+
+            // Remove from UI
+            successfulFiles.forEach((r) => {
+              setUploadTracker((prev) => ({
+                ...prev,
+                files: prev.files.filter((f) => f.hash !== r.metadata.hash),
+              }));
+            });
+          } catch (dbError) {
+            console.error("❌ DB save failed:", dbError);
+            results.failedCount += successfulFiles.length;
+          }
+        }
+
+        const failedFiles = uploadedBatch.filter((r) => !r.success);
+        results.failedCount += failedFiles.length;
+
+        // Update progress with real-time stats
+        this.updateProgress(i, batch.length, files.length, setUploadTracker);
+      }
+    } finally {
+      realSpeedDetector.stopMonitoring();
+      setUploadTracker((prev) => ({
+        ...prev,
+        results: {
+          successCount: results.successCount,
+          failedCount: results.failedCount,
+        },
+      }));
+      completeUpload(results);
+      await this.cleanupOrphaned();
+    }
+  }
+
+  updateProgress(currentIndex, batchSize, totalFiles, setUploadTracker) {
+    const now = Date.now();
+    const timeSinceLastUpdate = now - this.uploadStats.lastSpeedUpdate;
+
+    // Update every 2 seconds for better performance
+    if (timeSinceLastUpdate >= 2000) {
+      const progressPercent = Math.round(
+        ((currentIndex + batchSize) / totalFiles) * 100,
+      );
+
+      const timeDiff = (now - this.uploadStats.lastTime) / 1000;
+      const bytesDiff =
+        this.uploadStats.uploadedBytes - this.uploadStats.lastBytes;
+      const instantSpeedMbps =
+        bytesDiff > 0 && timeDiff > 0
+          ? (bytesDiff * 8) / (timeDiff * 1000000)
+          : 0;
+
+      this.uploadStats.lastBytes = this.uploadStats.uploadedBytes;
+      this.uploadStats.lastTime = now;
+      this.uploadStats.lastSpeedUpdate = now;
+
+      if (instantSpeedMbps > 0) {
+        realSpeedDetector.recordProgress(
+          this.uploadStats.uploadedBytes,
+          this.uploadStats.startTime,
+        );
+      }
+
+      const remainingBytes =
+        this.uploadStats.totalBytes - this.uploadStats.uploadedBytes;
+      const estimatedSeconds =
+        remainingBytes > 0 && instantSpeedMbps > 0
+          ? realSpeedDetector.estimateRemainingTime(remainingBytes)
+          : 0;
+
+      const speedIndicator = realSpeedDetector.getSpeedIndicator();
+
+      setUploadTracker((prev) => ({
+        ...prev,
+        totalProgress: progressPercent,
+        networkSpeed: speedIndicator.mbps,
+        speedQuality: speedIndicator.quality,
+        speedIcon: speedIndicator.icon,
+        speedColor: speedIndicator.color,
+        speedBars: speedIndicator.bars,
+        estimatedTimeRemaining: Math.ceil(estimatedSeconds),
+      }));
+    } else {
+      // Just update progress percentage
+      const progressPercent = Math.round(
+        ((currentIndex + batchSize) / totalFiles) * 100,
+      );
+      setUploadTracker((prev) => ({
+        ...prev,
+        totalProgress: progressPercent,
+      }));
+    }
+  }
+
+  async processBatchImages(batch, setUploadTracker, originalImg) {
+    const limit = pLimit(
+      Math.min(this.concurrentUploads, navigator.hardwareConcurrency || 4),
+    );
+
+    const results = await Promise.all(
+      batch.map((fileData) =>
+        limit(async () => {
+          if (this.isCancelled) return null;
+
+          try {
+            this.updateFileStatus(
+              setUploadTracker,
+              fileData.hash,
+              "processing",
+              0,
+            );
+
+            const processed = await workerPool.processImage(
+              fileData.file,
+              fileData.hash,
+              true,
+              originalImg,
+            );
+
+            this.updateFileStatus(
+              setUploadTracker,
+              fileData.hash,
+              "processed",
+              10,
+            );
+
+            return { fileData, processed };
+          } catch (error) {
+            console.error(`❌ Process failed: ${fileData.originalName}`, error);
+            this.updateFileStatus(
+              setUploadTracker,
+              fileData.hash,
+              "failed",
+              0,
+              error.message,
+            );
+            return null;
+          }
+        }),
+      ),
+    );
+
+    return results.filter((r) => r !== null);
+  }
+
+  async uploadBatch(batch, config, setUploadTracker) {
+    const limit = pLimit(this.concurrentUploads);
+
+    return Promise.all(
+      batch.map(({ fileData, processed }) =>
+        limit(async () => {
+          if (this.isCancelled) return { success: false, fileData };
+
+          try {
+            this.updateFileStatus(
+              setUploadTracker,
+              fileData.hash,
+              "uploading",
+              20,
+            );
+
+            const metadata = await retryHandler.executeWithRetry(
+              async () => {
+                return await this.uploadFileToB2(
+                  fileData,
+                  processed,
+                  config,
+                  setUploadTracker,
+                );
+              },
+              config.retryAttempts,
+              { fileName: fileData.originalName },
+            );
+
+            this.updateFileStatus(
+              setUploadTracker,
+              fileData.hash,
+              "completed",
+              100,
+            );
+
+            return {
+              success: true,
+              metadata,
+              uploadedPaths: metadata.uploadedPaths,
+            };
+          } catch (error) {
+            console.error(`❌ Upload failed: ${fileData.originalName}`, error);
+            this.updateFileStatus(
+              setUploadTracker,
+              fileData.hash,
+              "failed",
+              0,
+              error.message,
+            );
+            return {
+              success: false,
+              fileData,
+              error: error.message,
+              uploadedPaths: error.uploadedPaths || [],
+            };
+          }
+        }),
+      ),
     );
   }
 
-  if (error) {
-    return (
-      <div className="h-full overflow-auto flex items-center justify-center">
-        <div className="text-center">
-          <div className="text-red-500 text-6xl mb-4">⚠️</div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">
-            Error Loading Dashboard
-          </h2>
-          <p className="text-gray-600 mb-4">{error}</p>
-          <button
-            onClick={() => window.location.reload()}
-            className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
-          >
-            Retry
-          </button>
-        </div>
-      </div>
-    );
+  async uploadFileToB2(fileData, processed, config, setUploadTracker) {
+    const {
+      originalBlob,
+      thumbnailBlob,
+      metadata: procMetadata,
+      outputFormat,
+      outputExt,
+    } = processed;
+    const { user, uploadEventId, uploadAlbumId, originalImg } = config;
+    const basePath = `${user._id}/${uploadEventId}/${uploadAlbumId}/${fileData.hash}`;
+
+    const uploadedPaths = [];
+    const metadata = {
+      baseFolderPath: basePath,
+      hash: fileData.hash,
+      originalName: fileData.originalName,
+      uploadedBy: user._id,
+    };
+
+    try {
+      const thumbnailPath = `optimized/${basePath}.${outputExt}`;
+      const uploads = [];
+
+      // Upload thumbnail using SmartFileUploader
+      uploads.push(
+        (async () => {
+          const uploader = new SmartFileUploader(
+            thumbnailBlob,
+            thumbnailPath,
+            outputFormat,
+            (progress, bytesLoaded) => {
+              const adjustedProgress = originalImg
+                ? 20 + Math.floor(progress * 0.4)
+                : 20 + Math.floor(progress * 0.8);
+              this.updateFileStatus(
+                setUploadTracker,
+                fileData.hash,
+                "uploading",
+                adjustedProgress,
+              );
+              this.uploadStats.uploadedBytes += bytesLoaded;
+            },
+          );
+
+          await uploader.upload();
+
+          uploadedPaths.push(thumbnailPath);
+          this.pendingPaths.add(thumbnailPath);
+          this.saveOrphanToStorage(thumbnailPath);
+
+          metadata.thumbnail = {
+            width: procMetadata.thumbnail.width,
+            height: procMetadata.thumbnail.height,
+            folderName: "optimized",
+            sizeInMB: procMetadata.thumbnail.sizeInMB,
+            mimeType: outputFormat,
+            path: thumbnailPath,
+          };
+        })(),
+      );
+
+      // Upload original if enabled
+      if (originalImg) {
+        const originalExt = fileData.file.type.split("/")[1] || "jpg";
+        const originalPath = `originals/${basePath}.${originalExt}`;
+
+        uploads.push(
+          (async () => {
+            const uploader = new SmartFileUploader(
+              originalBlob,
+              originalPath,
+              fileData.file.type,
+              (progress, bytesLoaded) => {
+                const adjustedProgress = 60 + Math.floor(progress * 0.4);
+                this.updateFileStatus(
+                  setUploadTracker,
+                  fileData.hash,
+                  "uploading",
+                  adjustedProgress,
+                );
+                this.uploadStats.uploadedBytes += bytesLoaded;
+              },
+            );
+
+            await uploader.upload();
+
+            uploadedPaths.push(originalPath);
+            this.pendingPaths.add(originalPath);
+            this.saveOrphanToStorage(originalPath);
+
+            metadata.file = {
+              width: procMetadata.original.width,
+              height: procMetadata.original.height,
+              folderName: "originals",
+              sizeInMB: procMetadata.original.sizeInMB,
+              mimeType: fileData.file.type,
+              path: originalPath,
+            };
+          })(),
+        );
+      }
+
+      // Wait for both uploads in parallel
+      await Promise.all(uploads);
+
+      if (!originalImg) {
+        metadata.file = { ...metadata.thumbnail };
+      }
+
+      metadata.uploadedPaths = uploadedPaths;
+      return metadata;
+    } catch (error) {
+      if (uploadedPaths.length > 0) {
+        await this.cleanup(uploadedPaths);
+      }
+      error.uploadedPaths = uploadedPaths;
+      throw error;
+    }
   }
 
-  if (!dashboardData) return null;
+  updateFileStatus(setUploadTracker, hash, status, progress, error = null) {
+    setUploadTracker((prev) => ({
+      ...prev,
+      files: prev.files.map((f) =>
+        f.hash === hash ? { ...f, status, progress, error } : f,
+      ),
+    }));
+  }
 
-  // Filter events based on selected status
-  const filteredEvents = dashboardData.recentEvents?.filter((event) => {
-    if (filter === "all") return true;
-    return event.status === filter;
-  });
+  async cleanup(paths) {
+    if (!paths || paths.length === 0) return;
 
-  const statusOptions = [
-    { value: "all", label: "All Events" },
-    { value: "active", label: "Active" },
-    { value: "archived", label: "Archived" },
-    { value: "draft", label: "Draft" },
-  ];
+    try {
+      await failedDeleteImagesFromB2(paths.map((p) => ({ Key: p })));
 
-  const isApproachingLimits =
-    dashboardData.usagePercentages?.storage > 80 ||
-    dashboardData.usagePercentages?.events > 80 ||
-    dashboardData.currentPackage?.isTrial;
+      paths.forEach((p) => {
+        this.pendingPaths.delete(p);
+        this.failedPaths.delete(p);
+        this.removeOrphanFromStorage(p);
+      });
+    } catch (error) {
+      console.error("⚠️ Cleanup failed:", error.message);
+    }
+  }
 
-  return (
-    <div className="h-full w-full overflow-auto">
-      {/* Header */}
-      <div className="mb-4 flex flex-col sm:flex-row sm:justify-between items-center gap-2 md:gap-4">
-        <h1 className="text-lg md:text-base lg:text-lg xl:text-2xl font-bold text-gray-900">
-          Photography Dashboard
-        </h1>
-      </div>
+  async cleanupOrphaned() {
+    const orphanedPaths = [
+      ...Array.from(this.pendingPaths),
+      ...Array.from(this.failedPaths),
+    ];
 
-      {/* Usage Alert */}
-      {isApproachingLimits && <UpgradeButton />}
+    if (orphanedPaths.length > 0) {
+      await this.cleanup(orphanedPaths);
+    }
 
-      {/* Package Info */}
-      <PackageInfo packageData={dashboardData.currentPackage} />
+    this.pendingPaths.clear();
+    this.failedPaths.clear();
+  }
 
-      {/* Key Metrics */}
-      <div className="grid grid-cols-2 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
-        <Link href="/event">
-          <StatCard
-            icon={FaCalendarAlt}
-            title="Total Events"
-            value={dashboardData.usage.totalEventsCreated}
-            subtitle={`${dashboardData.usage.activeEvents} active, ${dashboardData.usage.archivedEvents} archived, ${dashboardData.usage.draftEvents} draft`}
-            color="#343148"
-          />
-        </Link>
-        <StatCard
-          icon={FaImages}
-          title="Total Photos"
-          value={dashboardData.usage.totalPhotosUploaded?.toLocaleString()}
-          subtitle="Across all events"
-          color="#d7c39d"
-        />
-        <StatCard
-          icon={FaFolderOpen}
-          title="Total Albums"
-          value={dashboardData.usage.totalAlbumsCreated}
-          subtitle="Across all events"
-          color="#343148"
-        />
-        <StatCard
-          icon={FaHdd}
-          title="Storage Used"
-          value={`${dashboardData.usage.totalMBUsed?.toLocaleString()} MB`}
-          subtitle={`${(
-            (dashboardData.usage.totalMBUsed /
-              dashboardData.currentPackage.totalPhotoMB) *
-            100
-          ).toFixed(1)}% of package`}
-          color="#d7c39d"
-        />
-      </div>
+  cancel() {
+    console.log("🛑 Cancelling upload...");
+    this.isCancelled = true;
+    realSpeedDetector.stopMonitoring();
+  }
+}
 
-      {/* Usage Overview */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-3 sm:p-4">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold text-gray-900 flex items-center">
-              <FaBox className="w-5 h-5 mr-2" style={{ color: "#343148" }} />
-              Package Limits Usage
-            </h3>
-            {isApproachingLimits && (
-              <Link
-                href="/upgrade-plan"
-                className="text-sm text-orange-600 hover:text-orange-800 font-medium"
-              >
-                Need more? Upgrade →
-              </Link>
-            )}
-          </div>
-          <div className="space-y-2 md:space-y-4">
-            <ProgressBar
-              current={dashboardData.usage.totalMBUsed}
-              total={dashboardData.currentPackage.totalPhotoMB}
-              label="Storage Space"
-              unit="MB"
-              percentage={dashboardData.usagePercentages.storage}
-            />
-            <ProgressBar
-              current={dashboardData.usage.totalEventsCreated}
-              total={dashboardData.currentPackage.eventLimit}
-              label="Events Created"
-              unit="events"
-              percentage={dashboardData.usagePercentages.events}
-            />
-            <ProgressBar
-              current={Math.floor(
-                dashboardData.usage.totalPhotosUploaded /
-                  (dashboardData.usage.totalAlbumsCreated || 1)
-              )}
-              total={dashboardData.currentPackage.imageLimitPerAlbum}
-              label="Avg. Images per Album"
-              unit="images"
-              percentage={dashboardData.usagePercentages.avgImagesPerAlbum}
-            />
-          </div>
-        </div>
-
-        {/* Storage Distribution */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-3 sm:p-4">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-            <FaChartLine className="w-5 h-5 mr-3 text-amber-600" />
-            <span className="hidden sm:inline">Storage Distribution</span>
-            <span className="sm:hidden">Distribution</span>
-          </h3>
-          <div className="h-52 sm:h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={dashboardData.storageUsage}
-                  cx="50%"
-                  cy="50%"
-                  outerRadius="70%"
-                  dataKey="value"
-                  label={({ name, value, percent }) =>
-                    window.innerWidth > 640
-                      ? `${name}: ${value?.toLocaleString()} MB`
-                      : `${(percent * 100).toFixed(0)}%`
-                  }
-                >
-                  {dashboardData.storageUsage.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  formatter={(value, name) => [
-                    `${value?.toLocaleString()} MB`,
-                    name,
-                  ]}
-                  contentStyle={{
-                    backgroundColor: "white",
-                    border: "1px solid #e5e7eb",
-                    borderRadius: "8px",
-                    fontSize: "14px",
-                  }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* Mobile Legend */}
-          <div className="mt-2 sm:hidden flex flex-wrap gap-2">
-            {dashboardData.storageUsage.map((item, index) => (
-              <div key={index} className="flex items-center space-x-2">
-                <div
-                  className="w-3 h-3 rounded-full"
-                  style={{ backgroundColor: item.color }}
-                />
-                <span className="text-sm text-gray-600">
-                  {item.name}: {item.value} MB
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Recent Events */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="px-4 sm:px-6 py-4 border-b border-gray-200 flex justify-between items-center">
-          <h3 className="text-lg font-semibold text-gray-900 flex items-center">
-            <FaCamera className="w-5 h-5 mr-3" style={{ color: "#d7c39d" }} />
-            Recent Events ({dashboardData.recentEvents?.length || 0})
-          </h3>
-          <div className="flex items-center gap-3">
-            <Link
-              href="/event"
-              className="text-sm text-blue-600 hover:text-blue-800 font-medium"
-            >
-              View All Events
-            </Link>
-            <Link
-              href="/new-event"
-              className="text-sm text-green-600 hover:text-green-800 font-medium"
-            >
-              Create New Event
-            </Link>
-            <select
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              className="block w-fit px-3 py-2 text-sm border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary"
-            >
-              {statusOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Desktop Table */}
-        <div className="hidden md:block overflow-hidden">
-          <div className="bg-gray-50 border-b border-gray-200 grid grid-cols-12 gap-4 px-6 py-3 text-xs font-medium text-gray-500 uppercase">
-            <div className="col-span-4">Event Name</div>
-            <div className="col-span-2">Date</div>
-            <div className="col-span-1">Albums</div>
-            <div className="col-span-1">Photos</div>
-            <div className="col-span-2">Storage (MB)</div>
-            <div className="col-span-1">Status</div>
-            <div className="col-span-1">Action</div>
-          </div>
-          <div className="overflow-y-auto max-h-96 divide-y divide-gray-200">
-            {filteredEvents?.length > 0 ? (
-              filteredEvents.map((event, index) => (
-                <div
-                  key={index}
-                  className="grid grid-cols-12 gap-4 px-6 py-4 hover:bg-gray-50 transition-colors cursor-pointer"
-                >
-                  <div className="col-span-4 font-medium text-gray-900 text-sm truncate">
-                    {event.name}
-                  </div>
-                  <div className="col-span-2 text-sm text-gray-500">
-                    {new Date(event.date).toLocaleDateString()}
-                  </div>
-                  <div className="col-span-1 flex items-center text-sm text-gray-600">
-                    <FaFolder
-                      className="w-4 h-4 mr-1.5"
-                      style={{ color: "#343148" }}
-                    />
-                    {event.albums}
-                  </div>
-                  <div className="col-span-1 flex items-center text-sm text-gray-600">
-                    <FaImages
-                      className="w-4 h-4 mr-1.5"
-                      style={{ color: "#d7c39d" }}
-                    />
-                    {event.photos}
-                  </div>
-                  <div className="col-span-2 flex items-center text-sm text-gray-600">
-                    <FaHdd
-                      className="w-4 h-4 mr-1.5"
-                      style={{ color: "#343148" }}
-                    />
-                    {event.mbUsed.toLocaleString()}
-                  </div>
-                  <div className="col-span-1">
-                    <StatusBadge status={event.status} />
-                  </div>
-                  <div className="col-span-1">
-                    <Link
-                      href={`/event/${event._id}`}
-                      className="text-gray-500 hover:text-primary"
-                      aria-label="View event"
-                    >
-                      <FaEye className="w-4 h-4" />
-                    </Link>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="p-6 text-center text-gray-500">
-                No events found matching your filter
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Mobile Cards */}
-        <div className="md:hidden overflow-y-auto max-h-96 p-2.5 md:p-4">
-          {filteredEvents?.length > 0 ? (
-            filteredEvents.map((event, index) => (
-              <EventCard key={index} event={event} />
-            ))
-          ) : (
-            <div className="p-4 text-center text-gray-500 bg-white rounded-lg">
-              No events found matching your filter
-            </div>
-          )}
-        </div>
-
-        {/* Empty State */}
-        {(!dashboardData.recentEvents ||
-          dashboardData.recentEvents.length === 0) && (
-          <div className="text-center py-12">
-            <FaCamera className="mx-auto h-12 w-12 text-gray-400" />
-            <h3 className="mt-2 text-sm font-medium text-gray-900">
-              No events
-            </h3>
-            <p className="mt-1 text-sm text-gray-500">
-              Get started by creating your first event.
-            </p>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+export const simpleUploader = new SimpleUploader();
+export {
+  workerPool,
+  realSpeedDetector,
+  retryHandler,
+  SmartFileUploader,
+  UPLOAD_THRESHOLDS,
 };
-
-export default Dashboard;
