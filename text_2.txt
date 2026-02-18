@@ -1,0 +1,724 @@
+// services/paymentProcessor.js
+import Razorpay from "razorpay";
+import config from "../config/config.js";
+import crypto from "crypto";
+import ClientPackage from "../models/enterprise/clientPackage.js";
+import EnterprisePackageHistory from "../models/enterprise/packageHistory.js";
+import EnterprisePackage from "../models/admin/enterprisePackage.js";
+import { SubscriptionAction, PaymentStatus } from "../utils/enums/index.js";
+import { throwHttpError } from "../utils/generalUtils.js";
+import HTTP from "../constants/httpStatusCodes.js";
+import constants from "../constants/messageConstants.js";
+import {
+  getPackageWithUsage,
+  calculatePackageAmount,
+  validateActionType,
+  getSubscriptionAction,
+  processUpgrade,
+  processRenewal,
+} from "../utils/util.package.js";
+import Logging from "../library/Logging.js";
+
+const razorpay = new Razorpay({
+  key_id: config.razorpay.key_id,
+  key_secret: config.razorpay.key_secret,
+});
+
+// Create Razorpay order
+export const createOrder = async (amount, currency = "USD", notes = {}) => {
+  const razorpayAmount = Math.round(amount * 100); // paise for USD
+  return razorpay.orders.create({
+    amount: razorpayAmount,
+    currency,
+    receipt: `fmp-${crypto.randomUUID()}`,
+    notes,
+  });
+};
+
+// Verify payment signature
+export const verifyPayment = (orderId, paymentId, signature) => {
+  const generatedSignature = crypto
+    .createHmac("sha256", config.razorpay.key_secret)
+    .update(orderId + "|" + paymentId)
+    .digest("hex");
+  return generatedSignature === signature;
+};
+
+// Fetch payment details from Razorpay
+export const fetchPayment = async (paymentId) => {
+  return razorpay.payments.fetch(paymentId);
+};
+
+// Initiate package upgrade/renewal (called from controller)
+export const initiatePackage = async (
+  enterpriseClientId,
+  newPackageId,
+  actionType,
+  currency = "USD"
+) => {
+  // 1. Get target package
+  const targetPackage = await EnterprisePackage.findById(newPackageId).lean();
+  if (!targetPackage) {
+    return throwHttpError(
+      "BAD_REQUEST",
+      constants.package.notFound,
+      HTTP.NOT_FOUND
+    );
+  }
+  // 2. Get current package
+  const currentPackage = await ClientPackage.findOne({ enterpriseClientId })
+    .populate("packageId")
+    .lean();
+  if (!currentPackage) {
+    return throwHttpError(
+      "BAD_REQUEST",
+      "No active package found",
+      HTTP.NOT_FOUND
+    );
+  }
+
+  // 3. Validate action
+  const validatedAction = validateActionType(
+    currentPackage,
+    newPackageId,
+    actionType
+  );
+
+  // 4. Calculate pricing
+  const pricingBreakdown = calculatePackageAmount(
+    currentPackage,
+    targetPackage,
+    validatedAction,
+    currency
+  );
+
+  // 5. Create Razorpay order
+  const order = await createOrder(pricingBreakdown.amountDue, currency, {
+    enterpriseClientId,
+    currentPackageId: currentPackage._id,
+    newPackageId,
+    actionType: validatedAction,
+    currency,
+  });
+
+  if (!order || !order.id) {
+    return throwHttpError(
+      "INTERNAL_SERVER_ERROR",
+      "Failed to create payment order",
+      HTTP.INTERNAL_SERVER_ERROR
+    );
+  }
+
+  // 6. Create PENDING history record (NOT client package)
+  const subscriptionAction = getSubscriptionAction(
+    validatedAction,
+    currentPackage
+  );
+
+  await EnterprisePackageHistory.create({
+    enterpriseClientId,
+    packageId: targetPackage._id,
+    action: subscriptionAction.initiated,
+    packageDetails: targetPackage,
+    paymentDetails: {
+      razorpayOrderId: order.id,
+      packageCost: pricingBreakdown.packageCost,
+      packageOriginalPrice: pricingBreakdown.packageOriginalPrice,
+      packageDiscount: pricingBreakdown.packageDiscount,
+      packageDiscountAmount: pricingBreakdown.packageDiscountAmount,
+      proratedCreditFull: pricingBreakdown.proratedCreditFull,
+      proratedCreditApplied: pricingBreakdown.proratedCreditApplied,
+      proratedCreditLost: pricingBreakdown.proratedCreditLost,
+      amountDue: pricingBreakdown.amountDue,
+      currency,
+      symbol: pricingBreakdown.symbol,
+      paymentStatus: PaymentStatus.PENDING,
+    },
+    isActive: false,
+    previousPackageId: currentPackage.packageId._id,
+    notes: `Payment initiated for ${validatedAction} to ${targetPackage.packageName}`,
+    systemNotes: `Package: ${targetPackage.packageName} | Cost: ${pricingBreakdown.symbol}${pricingBreakdown.packageCost} | Amount Due: ${pricingBreakdown.symbol}${pricingBreakdown.amountDue}`,
+  });
+
+  // 7. Return order details to frontend
+  return {
+    orderId: order.id,
+    amount: pricingBreakdown.amountDue,
+    currency,
+    currencySymbol: pricingBreakdown.symbol,
+    key: config.razorpay.key_id,
+    pricingBreakdown,
+  };
+};
+
+// Verify payment + optionally activate (fallback for webhook)
+export const verifyPackage = async (
+  enterpriseClientId,
+  razorpayPaymentId,
+  razorpayOrderId,
+  razorpaySignature
+) => {
+  // 1. Verify signature
+  if (!verifyPayment(razorpayOrderId, razorpayPaymentId, razorpaySignature)) {
+    return throwHttpError(
+      "BAD_REQUEST",
+      "Invalid payment signature",
+      HTTP.BAD_REQUEST
+    );
+  }
+
+  // 2. ✅ FIRST: Check if webhook already processed (most common case)
+  const currentPackage = await ClientPackage.findOne({
+    enterpriseClientId,
+    "paymentDetails.razorpayPaymentId": razorpayPaymentId,
+  }).lean();
+
+  if (
+    currentPackage &&
+    currentPackage.paymentDetails.paymentStatus === PaymentStatus.COMPLETED
+  ) {
+    Logging.info(
+      `VERIFY: Package already activated by webhook for payment ${razorpayPaymentId}`
+    );
+    return { message: "Payment successful! Package activated." };
+  }
+
+  // 3. ✅ FALLBACK: Process if webhook missed (rare)
+  const payment = await fetchPayment(razorpayPaymentId);
+  if (!payment || payment.status !== "captured") {
+    return throwHttpError(
+      "BAD_REQUEST",
+      "Payment not captured",
+      HTTP.BAD_REQUEST
+    );
+  }
+
+  const pendingAction = await EnterprisePackageHistory.findOne({
+    enterpriseClientId,
+    "paymentDetails.razorpayOrderId": razorpayOrderId,
+  }).populate("packageId");
+
+  if (!pendingAction) {
+    return throwHttpError(
+      "BAD_REQUEST",
+      "No payment record found",
+      HTTP.NOT_FOUND
+    );
+  }
+
+  // 3. Idempotency: Skip if already processed
+  if (pendingAction.paymentDetails.paymentStatus === PaymentStatus.COMPLETED) {
+    return { message: "Package already activated successfully" };
+  }
+
+  // 4. Process if still PENDING or FAILED (webhook not yet arrived)
+  const current = await getPackageWithUsage(enterpriseClientId);
+  const paymentDetails = buildPaymentDetails(payment);
+
+  const isRenewal =
+    pendingAction.action === SubscriptionAction.RENEWAL_INITIATED;
+  if (isRenewal) {
+    await processRenewal(pendingAction, current, paymentDetails);
+  } else {
+    await processUpgrade(pendingAction, current, paymentDetails);
+  }
+
+  return {
+    message: `Package ${isRenewal ? "renewed" : "upgraded"} successfully`,
+  };
+};
+
+// Build normalized payment details from Razorpay response
+const buildPaymentDetails = (payment) => ({
+  id: payment.id,
+  orderId: payment.order_id,
+  method: payment.method,
+  currency: payment.currency,
+  amount: payment.amount,
+  fee: payment.fee,
+  tax: payment.tax,
+  email: payment.email,
+  contact: payment.contact,
+  bank: payment.bank || null,
+  vpa: payment.vpa || null,
+  wallet: payment.wallet || null,
+  cardId: payment.card_id || null,
+  invoiceId: payment.invoice_id,
+  createdAt: payment.created_at,
+  acquirerData: payment.acquirer_data || {},
+  rawResponse: payment,
+});
+
+
+
+
+
+
+import mongoose from "mongoose";
+import ClientPackage from "../models/enterprise/clientPackage.js";
+import EnterprisePackageHistory from "../models/enterprise/packageHistory.js";
+import Counter from "../models/counter.js";
+import {
+  actionType,
+  ClientPackageStatus,
+  PaymentStatus,
+  SubscriptionAction,
+} from "./enums/index.js";
+import { getPackagePricing } from "./currencyUtils.js";
+
+const getPackageWithUsage = async (enterpriseClientId) => {
+  const result = await ClientPackage.aggregate([
+    {
+      $match: {
+        enterpriseClientId: new mongoose.Types.ObjectId(enterpriseClientId),
+      },
+    },
+    {
+      $lookup: {
+        from: "enterprisepackages",
+        localField: "packageId",
+        foreignField: "_id",
+        as: "packageId",
+      },
+    },
+    { $unwind: "$packageId" },
+    {
+      $lookup: {
+        from: "enterpriseclientevents",
+        localField: "eventsDetails",
+        foreignField: "_id",
+        as: "events",
+      },
+    },
+    {
+      $addFields: {
+        eventStatistics: {
+          totalEvents: { $size: "$events" },
+          totalPhotos: { $sum: "$events.totalPhotos" },
+          totalMBUsed: { $round: [{ $sum: "$events.totalMBUsed" }, 2] },
+          totalAlbums: { $sum: "$events.totalAlbums" },
+        },
+      },
+    },
+    { $limit: 1 },
+  ]);
+  return result.length > 0 ? result[0] : null;
+};
+
+const getNextInvoiceNumber = async () => {
+  const result = await Counter.findByIdAndUpdate(
+    "invoice",
+    { $inc: { seq: 1 } },
+    { new: true, upsert: true }
+  );
+  return result.seq;
+};
+
+// Calculate amount based on action type
+function calculatePackageAmount(
+  currentPackage,
+  targetPackage,
+  actionType,
+  currency = "USD"
+) {
+  const now = new Date();
+  const isExpired = currentPackage.endDate < now;
+  const isTrial = currentPackage.isTrial;
+  const targetPricing = getPackagePricing(targetPackage.pricing, currency);
+
+  // ============ Package Pricing ============
+  const packageCost = targetPricing.packageCost; // ₹200
+  const packageOriginalPrice = targetPricing.packageOriginalPrice; // ₹250
+  const packageDiscount = targetPricing.packageDiscount; // 20
+  const packageDiscountAmount = targetPricing.packageDiscountAmount; // ₹50
+  const symbol = targetPricing.symbol;
+
+  // ============ RENEWAL: Full price ============
+  if (actionType === "renew") {
+    return {
+      packageCost,
+      packageOriginalPrice,
+      packageDiscount,
+      packageDiscountAmount,
+      proratedCreditFull: 0,
+      proratedCreditApplied: 0,
+      proratedCreditLost: 0,
+      amountDue: packageCost,
+      currency,
+      symbol,
+    };
+  }
+
+  // ============ UPGRADE Trial/Expired: Full price ============
+  if (isTrial || isExpired) {
+    return {
+      packageCost,
+      packageOriginalPrice,
+      packageDiscount,
+      packageDiscountAmount,
+      proratedCreditFull: 0,
+      proratedCreditApplied: 0,
+      proratedCreditLost: 0,
+      amountDue: packageCost,
+      currency,
+      symbol,
+    };
+  }
+
+  // ============ UPGRADE Active Paid: 90% prorated credit ============
+  const remainingDays = Math.ceil(
+    (currentPackage.endDate - now) / (1000 * 60 * 60 * 24)
+  );
+
+  if (remainingDays <= 0) {
+    return {
+      packageCost,
+      packageOriginalPrice,
+      packageDiscount,
+      packageDiscountAmount,
+      proratedCreditFull: 0,
+      proratedCreditApplied: 0,
+      proratedCreditLost: 0,
+      amountDue: packageCost,
+      currency,
+      symbol,
+    };
+  }
+
+  // Calculate prorated credit from AMOUNT PAID
+  const paidAmount = currentPackage.paymentDetails?.amountPaid || 0;
+  const packageValidity = currentPackage.packageId.validityInDays;
+  const dailyRate = paidAmount / packageValidity;
+  const proratedCreditFull = remainingDays * dailyRate; // 100%
+  const proratedCreditApplied = proratedCreditFull * 0.9; // 90%
+  const proratedCreditLost = proratedCreditFull * 0.1; // 10%
+  const amountDue = Math.max(0, packageCost - proratedCreditApplied);
+
+  return {
+    packageCost: Math.round(packageCost * 100) / 100,
+    packageOriginalPrice: Math.round(packageOriginalPrice * 100) / 100,
+    packageDiscount: Math.round(packageDiscount * 100) / 100,
+    packageDiscountAmount: Math.round(packageDiscountAmount * 100) / 100,
+    proratedCreditFull: Math.round(proratedCreditFull * 100) / 100,
+    proratedCreditApplied: Math.round(proratedCreditApplied * 100) / 100,
+    proratedCreditLost: Math.round(proratedCreditLost * 100) / 100,
+    amountDue: Math.round(amountDue * 100) / 100,
+    currency,
+    symbol,
+  };
+}
+
+// Validate action type based on current package state
+function validateActionType(currentPackage, newPackageId, requestedAction) {
+  const now = new Date();
+  const isExpired = currentPackage.endDate < now;
+  const isTrial = currentPackage.isTrial;
+  const isSamePackage = currentPackage.packageId._id.equals(newPackageId);
+
+  // ============ TRIAL USERS ============
+  if (isTrial) {
+    if (requestedAction === actionType.RENEW) {
+      throw new Error(
+        "Trial plans cannot be renewed. Please upgrade to a paid plan."
+      );
+    }
+    return actionType.UPGRADE;
+  }
+
+  // ============ PAID ACTIVE ============
+  if (!isExpired) {
+    if (requestedAction === actionType.RENEW) {
+      throw new Error(
+        "Cannot renew an active plan. Renewal is only available after expiration."
+      );
+    }
+    return actionType.UPGRADE;
+  }
+
+  // ============ PAID EXPIRED ============
+  if (isExpired) {
+    if (isSamePackage) {
+      // If user explicitly wants renewal, allow it
+      return requestedAction === actionType.RENEW
+        ? actionType.RENEW
+        : actionType.UPGRADE;
+    } else {
+      // Different package = must be upgrade
+      if (requestedAction === actionType.RENEW) {
+        throw new Error(
+          "Different package selected. This is an upgrade, not a renewal."
+        );
+      }
+      return actionType.UPGRADE;
+    }
+  }
+
+  return requestedAction;
+}
+
+const createPackageHistory = async (data) => {
+  return EnterprisePackageHistory.create(data);
+};
+
+// Get subscription action enum
+function getSubscriptionAction(actionType, currentPackage) {
+  if (actionType === actionType.RENEW) {
+    return {
+      initiated: SubscriptionAction.RENEWAL_INITIATED,
+      completed: SubscriptionAction.SUBSCRIPTION_RENEWED,
+    };
+  } else {
+    return {
+      initiated: SubscriptionAction.UPGRADE_INITIATED,
+      completed: currentPackage.isTrial
+        ? SubscriptionAction.TRIAL_UPGRADED
+        : SubscriptionAction.SUBSCRIPTION_CHANGED,
+    };
+  }
+}
+
+// Process upgrade (called from webhook + verify)
+const processUpgrade = async (upgrade, current, paymentDetails) => {
+  const now = new Date();
+  const isExpired = current.endDate < now;
+  const isTrial = current.isTrial;
+
+  const newEndDate = new Date(now);
+  newEndDate.setDate(newEndDate.getDate() + upgrade.packageId.validityInDays);
+
+  let completedAction;
+  if (isTrial) completedAction = SubscriptionAction.TRIAL_UPGRADED;
+  else if (isExpired) completedAction = SubscriptionAction.SUBSCRIPTION_STARTED;
+  else completedAction = SubscriptionAction.SUBSCRIPTION_CHANGED;
+
+  // 1. Close current active package history
+  await EnterprisePackageHistory.updateOne(
+    {
+      enterpriseClientId: upgrade.enterpriseClientId,
+      packageId: current.packageId._id,
+      isActive: true,
+    },
+    {
+      $set: {
+        action: completedAction,
+        usageAtAction: current.eventStatistics,
+        isActive: false,
+        endDate: now,
+        systemNotes: `${
+          isTrial
+            ? "Trial upgraded"
+            : isExpired
+            ? "Expired package upgraded"
+            : "Active package upgraded"
+        } at ${now.toISOString()}`,
+        notes: `Upgraded to ${upgrade.packageId.packageName}`,
+      },
+    }
+  );
+
+  // 2. Update client package
+  const invoice = await getNextInvoiceNumber();
+  await ClientPackage.updateOne(
+    { enterpriseClientId: upgrade.enterpriseClientId },
+    {
+      $set: {
+        packageId: upgrade.packageId._id,
+        startDate: now,
+        endDate: newEndDate,
+        paymentDetails: {
+          razorpayOrderId: paymentDetails.orderId,
+          razorpayPaymentId: paymentDetails.id,
+          packageCost: upgrade.paymentDetails.packageCost,
+          packageOriginalPrice: upgrade.paymentDetails.packageOriginalPrice,
+          packageDiscount: upgrade.paymentDetails.packageDiscount,
+          packageDiscountAmount: upgrade.paymentDetails.packageDiscountAmount,
+          proratedCreditFull: upgrade.paymentDetails.proratedCreditFull,
+          proratedCreditApplied: upgrade.paymentDetails.proratedCreditApplied,
+          proratedCreditLost: upgrade.paymentDetails.proratedCreditLost,
+          amountDue: upgrade.paymentDetails.amountDue,
+          amountPaid: upgrade.paymentDetails.amountDue,
+          currency: paymentDetails.currency,
+          symbol: upgrade.paymentDetails.symbol,
+          paymentMethod: paymentDetails.method,
+          paymentStatus: PaymentStatus.COMPLETED,
+          paymentDate: new Date(paymentDetails.createdAt * 1000),
+          invoiceNumber: invoice,
+          invoiceUrl: paymentDetails.invoiceId
+            ? `https://dashboard.razorpay.com/invoice/${paymentDetails.invoiceId}`
+            : null,
+          bank: paymentDetails.bank,
+          vpa: paymentDetails.vpa,
+          wallet: paymentDetails.wallet,
+          cardId: paymentDetails.cardId,
+          fee: paymentDetails.fee,
+          tax: paymentDetails.tax,
+          acquirerData: paymentDetails.acquirerData,
+        },
+        status: ClientPackageStatus.ACTIVE,
+        isActive: true,
+        isTrial: false,
+      },
+    }
+  );
+
+  // 3. Activate upgrade history record
+  await EnterprisePackageHistory.updateOne(
+    { _id: upgrade._id },
+    {
+      $set: {
+        action: completedAction,
+        isActive: true,
+        startDate: now,
+        endDate: newEndDate,
+        usageAtAction: current.eventStatistics,
+        notes: isTrial
+          ? `Trial upgraded to ${upgrade.packageId.packageName}`
+          : `Package upgraded to ${upgrade.packageId.packageName}`,
+        systemNotes: `Upgrade Completed ${now.toISOString()} | Valid: ${newEndDate.toISOString()} | Invoice: ${invoice} | Cost: ${
+          upgrade.paymentDetails.symbol
+        }${upgrade.paymentDetails.packageCost}`,
+        paymentDetails: {
+          ...upgrade.paymentDetails,
+          razorpayPaymentId: paymentDetails.id,
+          amountPaid: upgrade.paymentDetails.amountDue,
+          paymentMethod: paymentDetails.method,
+          paymentStatus: PaymentStatus.COMPLETED,
+          paymentDate: new Date(paymentDetails.createdAt * 1000),
+          invoiceNumber: invoice,
+          invoiceUrl: paymentDetails.invoiceId
+            ? `https://dashboard.razorpay.com/invoice/${paymentDetails.invoiceId}`
+            : null,
+          bank: paymentDetails.bank,
+          vpa: paymentDetails.vpa,
+          wallet: paymentDetails.wallet,
+          cardId: paymentDetails.cardId,
+          fee: paymentDetails.fee,
+          tax: paymentDetails.tax,
+          acquirerData: paymentDetails.acquirerData,
+        },
+      },
+    }
+  );
+};
+
+// Process renewal (similar structure)
+const processRenewal = async (renewal, current, paymentDetails) => {
+  const now = new Date();
+  const isExpired = current.endDate < now;
+  const startDate = isExpired ? now : current.endDate;
+  const newEndDate = new Date(startDate);
+  newEndDate.setDate(newEndDate.getDate() + renewal.packageId.validityInDays);
+
+  // 1. Close current history
+  await EnterprisePackageHistory.updateOne(
+    {
+      enterpriseClientId: renewal.enterpriseClientId,
+      packageId: current.packageId._id,
+      isActive: true,
+    },
+    {
+      $set: {
+        action: SubscriptionAction.SUBSCRIPTION_RENEWED,
+        usageAtAction: current.eventStatistics,
+        isActive: false,
+        endDate: now,
+        systemNotes: isExpired
+          ? `Package renewed after expiration at ${now.toISOString()}`
+          : `Package renewed before expiration at ${now.toISOString()}`,
+        notes: `Renewed for ${renewal.packageId.validityInDays} additional days`,
+      },
+    }
+  );
+
+  // 2. Update client package
+  const invoice = await getNextInvoiceNumber();
+  await ClientPackage.updateOne(
+    { enterpriseClientId: renewal.enterpriseClientId },
+    {
+      $set: {
+        startDate: now,
+        endDate: newEndDate,
+        paymentDetails: {
+          razorpayOrderId: paymentDetails.orderId,
+          razorpayPaymentId: paymentDetails.id,
+          packageCost: renewal.paymentDetails.packageCost,
+          packageOriginalPrice: renewal.paymentDetails.packageOriginalPrice,
+          packageDiscount: renewal.paymentDetails.packageDiscount,
+          packageDiscountAmount: renewal.paymentDetails.packageDiscountAmount,
+          proratedCreditFull: 0,
+          proratedCreditApplied: 0,
+          proratedCreditLost: 0,
+          amountDue: renewal.paymentDetails.amountDue,
+          amountPaid: renewal.paymentDetails.amountDue,
+          currency: paymentDetails.currency,
+          symbol: renewal.paymentDetails.symbol,
+          paymentMethod: paymentDetails.method,
+          paymentStatus: PaymentStatus.COMPLETED,
+          paymentDate: new Date(paymentDetails.createdAt * 1000),
+          invoiceNumber: invoice,
+          invoiceUrl: paymentDetails.invoiceId
+            ? `https://dashboard.razorpay.com/invoice/${paymentDetails.invoiceId}`
+            : null,
+          bank: paymentDetails.bank,
+          vpa: paymentDetails.vpa,
+          wallet: paymentDetails.wallet,
+          cardId: paymentDetails.cardId,
+          fee: paymentDetails.fee,
+          tax: paymentDetails.tax,
+          acquirerData: paymentDetails.acquirerData,
+        },
+        status: ClientPackageStatus.ACTIVE,
+        isActive: true,
+        isTrial: false,
+      },
+    }
+  );
+
+  // 3. Activate renewal history
+  await EnterprisePackageHistory.updateOne(
+    { _id: renewal._id },
+    {
+      $set: {
+        action: SubscriptionAction.SUBSCRIPTION_RENEWED,
+        isActive: true,
+        startDate: now,
+        endDate: newEndDate,
+        usageAtAction: current.eventStatistics,
+        notes: isExpired
+          ? `Package renewed after expiration for ${renewal.packageId.validityInDays} days`
+          : `Package renewed for ${renewal.packageId.validityInDays} days`,
+        systemNotes: `Renewal Completed ${now.toISOString()} | Valid Until: ${newEndDate.toISOString()} | Invoice: ${invoice}`,
+        paymentDetails: {
+          ...renewal.paymentDetails,
+          razorpayPaymentId: paymentDetails.id,
+          amountPaid: renewal.paymentDetails.amountDue,
+          paymentMethod: paymentDetails.method,
+          paymentStatus: PaymentStatus.COMPLETED,
+          paymentDate: new Date(paymentDetails.createdAt * 1000),
+          invoiceNumber: invoice,
+          invoiceUrl: paymentDetails.invoiceId
+            ? `https://dashboard.razorpay.com/invoice/${paymentDetails.invoiceId}`
+            : null,
+          bank: paymentDetails.bank,
+          vpa: paymentDetails.vpa,
+          wallet: paymentDetails.wallet,
+          cardId: paymentDetails.cardId,
+          fee: paymentDetails.fee,
+          tax: paymentDetails.tax,
+          acquirerData: paymentDetails.acquirerData,
+        },
+      },
+    }
+  );
+};
+
+export {
+  getPackageWithUsage,
+  getNextInvoiceNumber,
+  calculatePackageAmount,
+  validateActionType,
+  createPackageHistory,
+  getSubscriptionAction,
+  processUpgrade,
+  processRenewal,
+};

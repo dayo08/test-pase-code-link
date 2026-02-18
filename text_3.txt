@@ -1,0 +1,121 @@
+export const RoleType = Object.freeze({
+  ADMIN: "admin",
+  SUBADMIN: "subAdmin",
+  USER: "user",
+  ENTERPRISECLIENT: "enterpriseClient",
+});
+
+export const OnlineRoleType = Object.freeze({
+  ONLINE: "online",
+  OFFLINE: "offline",
+});
+
+export const VerifyType = Object.freeze({
+  VERIFIED: "verified",
+  UNVERIFIED: "unverified",
+});
+
+export const ClientType = Object.freeze({
+  PHOTOGRAPHER: "photographer",
+  ENTERPRISE: "enterprise",
+});
+
+export const AccountStatus = Object.freeze({
+  ACTIVATE: "activate",
+  DEACTIVE: "deactivate",
+  DELETED: "deleted",
+});
+
+export const ContactStatus = Object.freeze({
+  PENDING: "pending",
+  IN_PROGRESS: "in_progress",
+  RESOLVED: "resolved",
+  CLOSED: "closed",
+});
+
+export const SubscriptionAction = {
+  // Trial Actions
+  TRIAL_STARTED: "trial_started",
+  TRIAL_UPGRADED: "trial_upgraded",
+  TRIAL_EXPIRED: "trial_expired",
+
+  // Upgrade/Change Actions
+  UPGRADE_INITIATED: "upgrade_initiated",
+  SUBSCRIPTION_STARTED: "subscription_started",
+  SUBSCRIPTION_CHANGED: "subscription_changed",
+
+  // Renewal Actions
+  RENEWAL_INITIATED: "renewal_initiated",
+  SUBSCRIPTION_RENEWED: "subscription_renewed",
+
+  // Expiry
+  SUBSCRIPTION_EXPIRED: "subscription_expired",
+};
+
+export const PaymentStatus = {
+  PENDING: "pending",
+  COMPLETED: "completed",
+  FAILED: "failed",
+};
+
+export const actionType = Object.freeze({
+  UPGRADE: "upgrade",
+  RENEW: "renew",
+});
+
+export const ClientPackageStatus = {
+  TRIAL: "trial",
+  ACTIVE: "active",
+  EXPIRED: "expired",
+  CANCELLED: "cancelled",
+};
+
+export const EventStatus = Object.freeze({
+  ACTIVE: "active", // visible to users, uploads allowed
+  ARCHIVED: "archived", // read-only, but not deleted
+  DRAFT: "draft", // Not visible to users
+});
+
+export const DownloadStatus = Object.freeze({
+  ALL: "all",
+  SELFIE_ONLY: "selfie-only",
+  DISABLED: "disabled",
+});
+
+export const GstSelected = {
+  YES: "yes",
+  NO: "no",
+};
+
+/** OTP */
+export const OtpType = Object.freeze({
+  FORGET: "forgetPassword",
+  USERVERIFICATION: "userVerification",
+});
+
+export const AuthType = {
+  EMAIL: "email",
+};
+
+export const Provider = {
+  GOOGLE: "google",
+  APPLE: "apple",
+  FACEBOOK: "facebook",
+  TWITTER: "twitter",
+  DEFAULT: "default",
+};
+
+export const quality = {
+  ORIGINAL: "original",
+  OPTIMIZED: "optimized",
+};
+
+export const symbols = Object.freeze({
+  INR: "₹",
+  USD: "$",
+});
+
+export const StorageType = {
+  MB_BASED: "MB_BASED",
+  PHOTO_COUNT: "PHOTO_COUNT",
+};
