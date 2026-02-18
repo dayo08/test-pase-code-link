@@ -1,0 +1,542 @@
+"use client";
+import { useAlbum } from "@/src/context/albumContext";
+import { useRootData } from "@/src/context/rootContext";
+import { validateAlbumImages } from "@/src/redux/features/album/albumThunks";
+import { simpleUploader } from "@/src/utils/uploadHelpers";
+import sha256 from "crypto-js/sha256";
+import dynamic from "next/dynamic";
+import { useEffect, useState } from "react";
+import { useSelector } from "react-redux";
+
+const UploadManager = dynamic(() => import("./UploadManager"), {
+  loading: () => null,
+  ssr: false,
+});
+const Header = dynamic(() => import("./Header"));
+const Sidebar = dynamic(() => import("./Sidebar"));
+const DeleteAlbum = dynamic(() => import("./DeleteAlbum"));
+const UploadModal = dynamic(() => import("./UploadModal"));
+const DuplicateFilesModal = dynamic(() => import("./DuplicateFilesModal"));
+const RejectionModal = dynamic(() => import("./RejectionModal"));
+const ImageGallery = dynamic(() => import("./ImageGallery"));
+const UploadSection = dynamic(() => import("./UploadSection"));
+const EmptyState = dynamic(() => import("./EmptyState"));
+
+export default function EventAlbumPage() {
+  const { onePackage, user } = useRootData();
+  const {
+    loadAlbums,
+    loadAlbum,
+    removeAlbum,
+    saveAlbum,
+    uploadImages,
+    replaceImages,
+    eventId,
+  } = useAlbum();
+  const { albums, loading, currentAlbum } = useSelector((state) => state.album);
+  const { oneEvent } = useSelector((state) => state.event);
+  const originalImg = onePackage?.packageId?.downloadOriginalImg;
+  const totalLimit = onePackage?.packageId?.totalPhotoMB || 0;
+  const totalUsed = onePackage?.eventStatistics?.totalMBUsed || 0;
+
+  const [state, setState] = useState({
+    albumName: "",
+    editAlbumId: null,
+    showDeleteModal: false,
+    albumToDelete: null,
+    selectedAlbumId: null,
+    selectedFiles: [],
+    sidebarVisible: true,
+    showUploadModal: false,
+    showRejectionModal: false,
+    selectedMB: 0,
+  });
+
+  const [uploadTracker, setUploadTracker] = useState({
+    files: [],
+    isUploading: false,
+    totalFiles: 0,
+    totalProgress: 0,
+    results: { successCount: 0, failedCount: 0 },
+    showResults: false,
+  });
+
+  const [pagination, setPagination] = useState({
+    page: 1,
+    limit: 100,
+    totalItems: 0,
+    totalPages: 1,
+  });
+  const [duplicatesModal, setDuplicatesModal] = useState({
+    open: false,
+    files: [],
+    action: null,
+  });
+  const [fileRejections, setFileRejections] = useState({
+    sizeExceeded: 0,
+    albumLimitExceeded: 0,
+    storageExceeded: 0,
+  });
+
+  useEffect(() => {
+    simpleUploader.loadOrphanedFiles();
+  }, []);
+
+  // Page refresh warning
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      if (uploadTracker.isUploading) {
+        e.preventDefault();
+        e.returnValue = "Uploads in progress. Leave anyway?";
+
+        // Cleanup on unload
+        simpleUploader.cancel();
+        return e.returnValue;
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [uploadTracker.isUploading]);
+
+  useEffect(() => {
+    setState((prev) => ({
+      ...prev,
+      selectedAlbumId: albums[0]?._id,
+    }));
+  }, [albums]);
+
+  useEffect(() => {
+    loadAlbums();
+  }, [loadAlbums]);
+
+  useEffect(() => {
+    if (state.selectedAlbumId) {
+      loadAlbum(state.selectedAlbumId, pagination.page, pagination.limit);
+    }
+  }, [loadAlbum, state.selectedAlbumId, pagination.page, pagination.limit]);
+
+  useEffect(() => {
+    if (currentAlbum) {
+      setPagination((prev) => ({
+        ...prev,
+        totalItems: currentAlbum.totalImages,
+        totalPages: currentAlbum.totalPages,
+      }));
+    }
+  }, [currentAlbum]);
+
+  // File selection handler
+  const handleFileChange = (e, isAppend = false) => {
+    const files = Array.from(e.target.files);
+    if (!files.length) {
+      if (!isAppend) alert("No files selected");
+      return;
+    }
+    if (files.length > 1000) {
+      alert("Max 1000 images at once");
+      return;
+    }
+
+    const {
+      imageLimitPerAlbum = 0,
+      maximumPhotoSize = 0,
+      totalPhotoMB = 0,
+    } = onePackage?.packageId || {};
+
+    // Calculate remaining slots considering existing selected files
+    const existingFilesCount = isAppend ? state.selectedFiles.length : 0;
+    const remaining = {
+      slots: Math.max(
+        0,
+        imageLimitPerAlbum -
+          (currentAlbum?.totalImages || 0) -
+          existingFilesCount,
+      ),
+      storage: Math.max(0, totalPhotoMB - totalUsed),
+    };
+
+    // Get existing file hashes for duplicate checking
+    const existingHashes = new Set(state.selectedFiles.map((f) => f.hash));
+
+    let duplicateCount = 0;
+    const { validFiles, counts } = files.reduce(
+      (acc, file) => {
+        const originalSize = +(file.size / 1048576).toFixed(4);
+        const size = originalImg
+          ? originalSize
+          : +(Math.random() * 0.1 + 0.4).toFixed(2);
+        const hash = sha256(file.name + file.size).toString();
+
+        // Check if file already exists
+        if (existingHashes.has(hash)) {
+          duplicateCount++;
+          return acc;
+        }
+
+        if (originalSize > maximumPhotoSize) acc.counts.size++;
+        else if (acc.validFiles.length >= remaining.slots) acc.counts.album++;
+        else if (acc.counts.totalMB + size > remaining.storage)
+          acc.counts.storage++;
+        else {
+          acc.validFiles.push({
+            file,
+            size,
+            originalSize,
+            originalName: file.name,
+            status: "ready",
+            hash,
+          });
+          acc.counts.totalMB += size;
+        }
+        return acc;
+      },
+      { validFiles: [], counts: { size: 0, album: 0, storage: 0, totalMB: 0 } },
+    );
+
+    setFileRejections({
+      sizeExceeded: counts.size,
+      albumLimitExceeded: counts.album,
+      storageExceeded: counts.storage,
+    });
+
+    // Show duplicate warning
+    if (duplicateCount > 0) {
+      alert(
+        `${duplicateCount} file${duplicateCount !== 1 ? "s" : ""} already ${duplicateCount === 1 ? "exists" : "exist"} in your selection. ${duplicateCount === 1 ? "It was" : "They were"} skipped.`,
+      );
+    }
+
+    if (validFiles.length) {
+      setState((prev) => {
+        const mergedFiles = isAppend
+          ? [...prev.selectedFiles, ...validFiles]
+          : validFiles;
+        const mergedMB = isAppend
+          ? prev.selectedMB + counts.totalMB
+          : counts.totalMB;
+
+        return {
+          ...prev,
+          showUploadModal: true,
+          selectedFiles: mergedFiles,
+          selectedMB: mergedMB,
+        };
+      });
+    }
+
+    if (counts.size || counts.album || counts.storage) {
+      setState((prev) => ({ ...prev, showRejectionModal: true }));
+    }
+  };
+
+  // Upload handler
+  const handleUpload = async () => {
+    if (!state.selectedAlbumId || !state.selectedFiles?.length) return;
+
+    try {
+      const { acceptedFiles, duplicateFiles, rejectionCounts } =
+        await validateAlbumImages({
+          albumId: state.selectedAlbumId,
+          eventId: oneEvent?._id,
+          files: state.selectedFiles.map(({ file, ...rest }) => rest),
+        });
+
+      if (
+        rejectionCounts.sizeExceeded ||
+        rejectionCounts.albumLimitExceeded ||
+        rejectionCounts.storageExceeded
+      ) {
+        setFileRejections(rejectionCounts);
+        setState((prev) => ({ ...prev, showRejectionModal: true }));
+        return;
+      }
+
+      if (duplicateFiles?.length > 0) {
+        setDuplicatesModal({ open: true, files: duplicateFiles, action: null });
+        return;
+      }
+
+      const fileMap = new Map(state.selectedFiles.map((f) => [f.hash, f.file]));
+      const trackedFiles = acceptedFiles.map((file) => ({
+        ...file,
+        file: fileMap.get(file.hash),
+        status: "pending",
+        progress: 0,
+      }));
+
+      await uploadFiles(trackedFiles);
+    } catch (err) {
+      console.error("Upload failed:", err);
+    }
+  };
+
+  const uploadFiles = async (trackedFiles) => {
+    console.time("uploadFiles");
+    setState((prev) => ({
+      ...prev,
+      showUploadModal: false,
+      selectedFiles: [],
+    }));
+
+    setUploadTracker({
+      files: trackedFiles,
+      isUploading: true,
+      totalFiles: trackedFiles.length,
+      totalProgress: 0,
+      results: { successCount: 0, failedCount: 0 },
+      showResults: false,
+    });
+
+    await simpleUploader.uploadFiles(trackedFiles, {
+      setUploadTracker,
+      uploadImages,
+      user,
+      uploadEventId: oneEvent?._id,
+      uploadAlbumId: state.selectedAlbumId,
+      originalImg,
+      completeUpload: (results) => {
+        setUploadTracker((prev) => ({
+          ...prev,
+          isUploading: false,
+          totalProgress: 100,
+          results,
+          showResults: true,
+        }));
+
+        // Refresh album
+        // loadAlbum(state.selectedAlbumId, pagination.page, pagination.limit);
+
+        // Auto close after 10s if successful
+        if (results.failedCount === 0 && results.successCount > 0) {
+          setTimeout(() => closeUploadModal(), 10000);
+        }
+      },
+    });
+    console.timeEnd("uploadFiles");
+  };
+
+  const handleDuplicateResolution = async (action) => {
+    const filesToUpload = state.selectedFiles.filter(
+      (file) =>
+        !duplicatesModal.files.some(
+          (df) => df.hash === file.hash && action === "skip",
+        ),
+    );
+
+    if (action === "replace") {
+      const replaceHashes = duplicatesModal.files.map((df) => df.hash);
+      await replaceImages(state.selectedAlbumId, replaceHashes);
+    }
+
+    const fileMap = new Map(filesToUpload.map((f) => [f.hash, f.file]));
+    const trackedFiles = filesToUpload.map((file) => ({
+      ...file,
+      file: fileMap.get(file.hash),
+      status: "pending",
+      progress: 0,
+    }));
+
+    await uploadFiles(trackedFiles);
+    setDuplicatesModal({ open: false, files: [], action: null });
+  };
+
+  const cancelUpload = () => {
+    if (!window.confirm("Cancel upload? All progress will be lost.")) return;
+    simpleUploader.cancel();
+    setTimeout(() => window.location.reload(), 500);
+  };
+
+  const closeUploadModal = () => {
+    setUploadTracker({
+      files: [],
+      isUploading: false,
+      totalFiles: 0,
+      totalProgress: 0,
+      results: { successCount: 0, failedCount: 0 },
+      showResults: false,
+    });
+  };
+
+  const confirmDelete = async () => {
+    await removeAlbum(state.albumToDelete);
+    setState((prev) => ({
+      ...prev,
+      showDeleteModal: false,
+      albumToDelete: null,
+      selectedAlbumId:
+        prev.selectedAlbumId === prev.albumToDelete
+          ? null
+          : prev.selectedAlbumId,
+    }));
+  };
+
+  //  Reset pagination when changing album
+  const handleAlbumSelect = (albumId) => {
+    // Only reset if actually changing to a different album
+    if (albumId !== state.selectedAlbumId) {
+      setState((prev) => ({
+        ...prev,
+        selectedAlbumId: albumId,
+      }));
+
+      // 🔥 Reset pagination to page 1
+      setPagination((prev) => ({
+        ...prev,
+        page: 1, // ← CRITICAL FIX
+        totalItems: 0,
+        totalPages: 1,
+      }));
+    }
+  };
+
+  const updateState = (updates) =>
+    setState((prev) => ({ ...prev, ...updates }));
+  const showUploadManager =
+    uploadTracker.isUploading ||
+    uploadTracker.files.length > 0 ||
+    uploadTracker.showResults;
+
+  return (
+    <div className="max-h-full overflow-auto flex flex-col">
+      <Header
+        oneEvent={oneEvent}
+        sidebarVisible={state.sidebarVisible}
+        setSidebarVisible={(val) => updateState({ sidebarVisible: val })}
+      />
+
+      <div className="flex flex-1 overflow-hidden">
+        <Sidebar
+          albums={albums}
+          loading={loading}
+          setAlbumName={(val) => updateState({ albumName: val })}
+          setSidebarVisible={(val) => updateState({ sidebarVisible: val })}
+          handleAddOrUpdateAlbum={async () => {
+            if (!state.albumName.trim()) return;
+            const payload = state.editAlbumId
+              ? {
+                  albumName: state.albumName,
+                  eventId,
+                  albumId: state.editAlbumId,
+                }
+              : { albumName: state.albumName, eventId };
+            await saveAlbum(payload);
+            updateState({ albumName: "", editAlbumId: null });
+          }}
+          handleEdit={(album) =>
+            updateState({
+              albumName: album?.albumName || "",
+              editAlbumId: album?._id || null,
+            })
+          }
+          handleDelete={(id) =>
+            updateState({ albumToDelete: id, showDeleteModal: true })
+          }
+          handleSelect={handleAlbumSelect}
+          sidebarVisible={state.sidebarVisible}
+          albumName={state.albumName}
+          editAlbumId={state.editAlbumId}
+          selectedAlbumId={state.selectedAlbumId}
+        />
+
+        <main className="flex-1 px-0 py-3 xl:px-3 overflow-y-auto">
+          {state.selectedAlbumId && currentAlbum ? (
+            <>
+              <UploadSection
+                handleFileChange={handleFileChange}
+                maxImageSize={onePackage?.packageId?.maximumPhotoSize}
+                currentAlbum={currentAlbum}
+              />
+              <ImageGallery
+                uploadedImages={currentAlbum?.images}
+                pagination={pagination}
+                onPageChange={(page) =>
+                  setPagination((prev) => ({ ...prev, page }))
+                }
+                onLimitChange={(limit) =>
+                  setPagination((prev) => ({
+                    ...prev,
+                    limit: Number(limit),
+                    page: 1,
+                  }))
+                }
+                currentAlbumId={currentAlbum._id}
+              />
+            </>
+          ) : (
+            <EmptyState
+              sidebarVisible={state.sidebarVisible}
+              setSidebarVisible={(val) => updateState({ sidebarVisible: val })}
+            />
+          )}
+        </main>
+      </div>
+
+      {/* Modals */}
+      {state.showDeleteModal && (
+        <DeleteAlbum
+          state={state.showDeleteModal}
+          updateState={updateState}
+          confirmDelete={confirmDelete}
+          isLoading={loading}
+        />
+      )}
+
+      {state.showUploadModal && (
+        <UploadModal
+          isOpen={state.showUploadModal}
+          onClose={() => updateState({ showUploadModal: false })}
+          selectedFiles={state.selectedFiles}
+          removeSelectedFile={(file) => {
+            const updated = state.selectedFiles.filter((f) => f !== file);
+            updateState({
+              selectedFiles: updated,
+              showUploadModal: !!updated.length,
+            });
+          }}
+          handleFileChange={handleFileChange}
+          handleUpload={handleUpload}
+          originalImg={originalImg}
+          selectedMB={state.selectedMB}
+          totalMBAllocated={totalLimit}
+          totalMBUsed={totalUsed}
+        />
+      )}
+
+      {state.showRejectionModal && (
+        <RejectionModal
+          selectedFilesCount={state.selectedFiles.length}
+          isOpen={state.showRejectionModal}
+          onClose={() =>
+            setState((prev) => ({ ...prev, showRejectionModal: false }))
+          }
+          sizeExceeded={fileRejections.sizeExceeded}
+          albumLimitExceeded={fileRejections.albumLimitExceeded}
+          storageExceeded={fileRejections.storageExceeded}
+          maxSize={onePackage?.packageId?.maximumPhotoSize}
+          albumLimit={onePackage?.packageId?.imageLimitPerAlbum}
+          totalStorage={totalLimit}
+        />
+      )}
+
+      {duplicatesModal.open && (
+        <DuplicateFilesModal
+          originalImg={originalImg}
+          isOpen={duplicatesModal.open}
+          files={duplicatesModal.files}
+          onClose={() => setDuplicatesModal({ open: false, files: [] })}
+          onSkip={() => handleDuplicateResolution("skip")}
+          onReplace={() => handleDuplicateResolution("replace")}
+          onKeepBoth={() => handleDuplicateResolution("copy")}
+        />
+      )}
+
+      {showUploadManager && (
+        <UploadManager
+          uploadTracker={uploadTracker}
+          onCancel={cancelUpload}
+          onClose={closeUploadModal}
+        />
+      )}
+    </div>
+  );
+}
