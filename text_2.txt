@@ -1,424 +1,1436 @@
-"use client";
-import { useRootData } from "@/src/context/rootContext";
-import Image from "next/image";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import React from "react";
 import {
-  HiOutlineCalendar,
-  HiOutlineCollection,
-  HiOutlineDatabase,
-  HiOutlinePhotograph,
-} from "react-icons/hi";
-import { IoCloseOutline } from "react-icons/io5";
-import { LuUserCheck } from "react-icons/lu";
-import { MdOutlineError, MdOutlineWarning, MdRefresh } from "react-icons/md";
-import { RiLogoutCircleRLine } from "react-icons/ri";
-import { VscAccount } from "react-icons/vsc";
+  FiX,
+  FiPlus,
+  FiUpload,
+  FiHardDrive,
+  FiTrash2,
+  FiImage,
+} from "react-icons/fi";
+import Modal from "../Common/Modal";
 
-// Storage Info Component
-const StorageInfo = ({ eventStatistics, onClose, maxStorage }) => {
-  const [isMinimized, setIsMinimized] = useState(false);
-  const { refreshPackage, isRefreshingPackage } = useRootData();
-  const usedPercentage = (eventStatistics?.totalMBUsed / maxStorage) * 100;
+const UploadModal = ({
+  isOpen,
+  onClose,
+  selectedFiles,
+  removeSelectedFile,
+  handleFileChange,
+  handleUpload,
+  originalImg,
+  selectedMB,
+  totalMBUsed,
+  totalMBAllocated,
+}) => {
+  const isOverLimit = totalMBUsed + selectedMB > totalMBAllocated;
+  return (
+    <Modal
+      onClose={onClose}
+      className="bg-white rounded-2xl shadow-2xl p-0 max-w-6xl w-full h-screen mx-1 md:mx-4 overflow-hidden"
+      positionClass="items-center justify-center"
+      isOpen={isOpen}
+      closeOnOutsideClick={false}
+    >
+      <div className="flex flex-col h-full">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-primary to-primary/90 px-4 py-2 text-white">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg md:text-xl lg:text-2xl font-bold mb-1">
+                Upload Your Photos
+              </h3>
+              <p className="text-white/80 text-xs sm:text-sm">
+                {selectedFiles.length} photo{" "}
+                {selectedFiles.length !== 1 ? "s" : ""} selected
+              </p>
+            </div>
+            <div className="text-right">
+              <div className="bg-white/10 backdrop-blur-sm rounded-lg sm:rounded-xl px-3 py-1 sm:px-4 sm:py-2">
+                <div className="text-xl lg:text-2xl font-bold text-secondary">
+                  {selectedFiles.length}
+                </div>
+                <div className="text-[10px] sm:text-xs text-white/80">
+                  Files
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
 
-  const getStorageStatus = () => {
-    if (usedPercentage >= 100)
-      return {
-        level: "full",
-        color: "text-red-600",
-        bgColor: "bg-red-50",
-        icon: MdOutlineError,
-      };
-    if (usedPercentage >= 90)
-      return {
-        level: "critical",
-        color: "text-red-500",
-        bgColor: "bg-red-50",
-        icon: MdOutlineWarning,
-      };
-    if (usedPercentage >= 80)
-      return {
-        level: "warning",
-        color: "text-yellow-600",
-        bgColor: "bg-yellow-50",
-        icon: MdOutlineWarning,
-      };
-    return {
-      level: "good",
-      color: "text-green-600",
-      bgColor: "bg-green-50",
-      icon: HiOutlineDatabase,
-    };
-  };
+        <div className="flex-1 overflow-y-auto">
+          <div className="px-4 py-2 bg-gradient-to-r from-gray-50 to-white border-b">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2 sm:gap-3">
+                <div className="p-1 sm:p-2 bg-primary/10 rounded-md sm:rounded-lg">
+                  <FiHardDrive className="text-primary" size={16} />
+                </div>
+                <div>
+                  <h4 className="text-sm lg:text-base font-semibold text-gray-900">
+                    Storage Usage
+                  </h4>
+                  <p className="text-xs sm:text-sm text-gray-600">
+                    {totalMBUsed.toFixed(2)} MB of {totalMBAllocated} MB used
+                  </p>
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-base lg:text-lg font-bold text-secondary">
+                  +{selectedMB.toFixed(2)} MB
+                </div>
+                <div className="text-[10px] sm:text-xs text-gray-500">
+                  {originalImg ? "Original" : "Compress"} Size
+                </div>
+              </div>
+            </div>
 
-  const status = getStorageStatus();
-  const StatusIcon = status.icon;
+            <div className="overflow-hidden h-2 mb-1 text-xs flex rounded-full bg-gray-200">
+              <div
+                style={{
+                  width: `${Math.min(
+                    (totalMBUsed / totalMBAllocated) * 100,
+                    100
+                  )}%`,
+                }}
+                className="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-gradient-to-r from-primary to-secondary"
+              ></div>
+            </div>
+            {!isOverLimit && (
+              <div className="overflow-hidden h-2 text-xs flex rounded-full -mt-3">
+                <div
+                  style={{
+                    width: `${Math.min(
+                      ((totalMBUsed + selectedMB) / totalMBAllocated) * 100,
+                      100
+                    )}%`,
+                  }}
+                  className="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-gradient-to-r from-secondary/60 to-secondary/40"
+                ></div>
+              </div>
+            )}
+            {isOverLimit && (
+              <p className="text-red-600 text-xs font-medium mt-1">
+                Storage limit exceeded! Remove files to continue
+              </p>
+            )}
+          </div>
 
-  const getWarningMessage = () => {
-    if (usedPercentage >= 100)
-      return "Storage is full! Please delete some files.";
-    if (usedPercentage >= 90)
-      return "Storage is almost full! Consider cleaning up.";
-    if (usedPercentage >= 80)
-      return "Storage usage is high. Monitor carefully.";
-    return null;
-  };
+          {/* Simplified File List - No Previews */}
+          <div className="p-1.5 md:p-3">
+            <div className="border border-gray-200 rounded-lg overflow-hidden bg-gray-50/50">
+              {selectedFiles.length > 0 ? (
+                <div className="p-1.5 grid grid-cols-2 sm:grid-cols-4 gap-2 overflow-auto">
+                  {selectedFiles.map((file, idx) => (
+                    <div
+                      key={idx}
+                      className="p-1.5 bg-white rounded-lg border transition-all border-gray-200 hover:bg-gray-50"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="min-w-0">
+                          <h4 className="text-xs font-normal text-gray-900 line-clamp-1">
+                            {file.originalName}
+                          </h4>
+                          <div className="flex items-center mt-1 text-xs text-gray-500">
+                            <span className="bg-gray-100 px-2 py-1 rounded-lg font-medium">
+                              {file.size}
+                              MB
+                            </span>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => removeSelectedFile(file)}
+                          className="text-gray-400 hover:text-red-500 p-1"
+                          title="Remove file"
+                        >
+                          <FiTrash2 size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="h-full flex items-center justify-center text-gray-500 p-8">
+                  <div className="text-center">
+                    <FiImage size={32} className="mx-auto mb-2 text-gray-300" />
+                    <p className="text-sm">No files selected</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
 
-  const warningMessage = getWarningMessage();
+        {/* Action buttons */}
+        <div className="px-4 py-3 bg-gray-50 border-t">
+          <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 md:gap-4 justify-between">
+            <button
+              className="px-4 py-2 sm:px-6 sm:py-3 bg-white text-gray-700 border border-gray-300 rounded-lg sm:rounded-xl font-medium hover:bg-gray-50 hover:border-gray-400 transition-all duration-200 flex items-center justify-center gap-2 text-sm sm:text-base"
+              onClick={onClose}
+            >
+              <FiX size={14} />
+              Cancel
+            </button>
 
-  if (isMinimized) {
-    return (
-      <div className="fixed bottom-4 right-4 z-40">
-        <button
-          onClick={() => setIsMinimized(false)}
-          className="flex items-center gap-2 px-3 py-2 bg-white rounded-lg shadow-lg border border-gray-200 hover:shadow-xl transition-all duration-300"
-          style={{ borderColor: "var(--color-secondary)" }}
-        >
-          <StatusIcon className={`text-lg ${status.color}`} />
-          <span
-            className="text-sm font-medium"
-            style={{ color: "var(--color-primary)" }}
-          >
-            {Math.round(usedPercentage)}%
-          </span>
-        </button>
+            <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+              <label className="px-4 py-2 sm:px-6 sm:py-3 bg-gradient-to-r from-primary to-primary/90 text-white rounded-lg sm:rounded-xl cursor-pointer hover:from-primary/90 hover:to-primary transition-all duration-200 flex items-center justify-center gap-2 font-medium text-sm sm:text-base shadow-md hover:shadow-lg">
+                <FiPlus size={14} />
+                Add More
+                <input
+                  type="file"
+                  multiple
+                  onChange={(e) => handleFileChange(e, true)}
+                  className="hidden"
+                  accept="image/*"
+                />
+              </label>
+
+              <button
+                onClick={handleUpload}
+                disabled={isOverLimit}
+                className={`px-4 py-2 sm:px-6 sm:py-3 bg-gradient-to-r from-secondary to-secondary/90 text-primary rounded-lg sm:rounded-xl font-bold hover:from-secondary/90 hover:to-secondary transition-all duration-200 flex items-center justify-center gap-2 text-sm sm:text-base shadow-md hover:shadow-lg ${
+                  isOverLimit || selectedFiles.length === 0
+                    ? "opacity-50 cursor-not-allowed"
+                    : "hover:scale-[1.02]"
+                }`}
+              >
+                <FiUpload size={14} />
+                Upload
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
-    );
-  }
+    </Modal>
+  );
+};
+
+export default UploadModal;
+
+
+
+
+import React from "react";
+import {
+  FiHardDrive,
+  FiImage,
+  FiX,
+  FiAlertCircle,
+  FiArrowUp,
+  FiArrowUpRight,
+} from "react-icons/fi";
+import Modal from "../Common/Modal";
+import Link from "next/link";
+
+const RejectionModal = ({
+  isOpen,
+  onClose,
+  sizeExceeded = 0,
+  albumLimitExceeded = 0,
+  storageExceeded = 0,
+  maxSize,
+  albumLimit,
+  totalStorage,
+  selectedFilesCount,
+}) => {
+  const totalRejected = sizeExceeded + albumLimitExceeded + storageExceeded;
+  const successfulUploads = selectedFilesCount + totalRejected;
 
   return (
-    <div className="fixed bottom-4 right-4 z-40 w-full max-w-max sm:max-w-md">
-      <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-        {/* Header */}
-        <div
-          className="flex items-center justify-between p-4 border-b border-gray-100"
-          style={{ backgroundColor: "#f8f9fa" }}
-        >
-          <div className="flex items-center gap-2">
-            <HiOutlineDatabase className="text-xl text-primary" />
-            <h3 className="font-semibold text-sm text-primary">Storage Info</h3>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={refreshPackage}
-              disabled={isRefreshingPackage}
-              className="p-1 hover:bg-gray-200 rounded-full transition-colors duration-200 disabled:opacity-50"
-              title="Refresh Storage Data"
-            >
-              <MdRefresh
-                className={`text-lg text-primary ${
-                  isRefreshingPackage ? "animate-spin" : ""
-                }`}
-              />
-            </button>
-            <button
-              onClick={() => setIsMinimized(true)}
-              className="p-1 hover:bg-gray-200 rounded-full transition-colors duration-200"
-              title="Minimize"
-            >
-              <span className="text-sm font-bold text-primary">−</span>
-            </button>
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      className="bg-white rounded-3xl shadow-2xl max-w-md w-full mx-4 overflow-hidden"
+      closeOnOutsideClick={false}
+    >
+      <div className="relative">
+        {/* Header with gradient background */}
+        <div className="p-3 lg:p-4" style={{ backgroundColor: "#343148" }}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center justify-center w-12 h-12 bg-white bg-opacity-20 rounded-full backdrop-blur-sm">
+                <FiAlertCircle className="text-yellow-400" size={24} />
+              </div>
+              <div>
+                <h3 className="md:text-xl font-bold text-white">
+                  Upload Restricted
+                </h3>
+                <p className="text-sm text-white text-opacity-80">
+                  {totalRejected} file{totalRejected !== 1 ? "s" : ""} couldn't
+                  be added
+                </p>
+              </div>
+            </div>
             <button
               onClick={onClose}
-              className="p-1 hover:bg-gray-200 rounded-full transition-colors duration-200"
-              title="Close"
+              className="text-white text-opacity-70 hover:text-opacity-100 transition-all duration-200 p-2 rounded-full hover:bg-white hover:text-primary"
             >
-              <IoCloseOutline className="text-lg text-primary" />
+              <FiX size={20} />
             </button>
           </div>
         </div>
 
-        {/* Warning Message */}
-        {warningMessage && (
-          <div className={`p-3 border-b border-gray-100 ${status.bgColor}`}>
-            <div className="flex items-center gap-2">
-              <StatusIcon className={`text-lg ${status.color}`} />
-              <p className={`text-xs font-medium ${status.color}`}>
-                {warningMessage}
+        {/* Single Summary Message */}
+        <div className="px-3 lg:px-4 pt-3 lg:pt-4">
+          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-3 md:p-4 text-center">
+            <p className="text-sm md:text-base text-blue-700 font-medium">
+              <span className="font-bold">{successfulUploads}</span> total files
+              selected •
+              <span className="font-bold text-red-600"> {totalRejected}</span>{" "}
+              files not uploaded •
+              <span className="font-bold text-green-600">
+                {" "}
+                {selectedFilesCount}
+              </span>{" "}
+              files will be uploaded successfully
+            </p>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="p-3 lg:p-4 space-y-2 md:space-y-4">
+          {/* Size Exceeded Section */}
+          {sizeExceeded > 0 && (
+            <div className="group">
+              <div className="flex items-start gap-4 p-2 md:p-4 bg-gradient-to-r from-red-50 to-red-100 rounded-xl border border-red-200 hover:shadow-md transition-all duration-200">
+                <div className="flex items-center justify-center w-8 h-8 bg-red-500 rounded-full flex-shrink-0">
+                  <FiHardDrive className="text-white" size={16} />
+                </div>
+                <div className="flex-1">
+                  <h4 className="font-semibold text-red-700 md:mb-1 text-sm md:text-base">
+                    File Size Limit Exceeded
+                  </h4>
+                  <p className="text-xs md:text-sm text-red-600">
+                    {sizeExceeded} file{sizeExceeded !== 1 ? "s" : ""} exceed
+                    maximum size of {maxSize}MB.Remove limits by upgrading your
+                    plan
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Storage Exceeded Section */}
+          {storageExceeded > 0 && (
+            <div className="group">
+              <div className="flex items-start gap-4 p-2 md:p-4 bg-gradient-to-r from-purple-50 to-purple-100 rounded-xl border border-purple-200 hover:shadow-md transition-all duration-200">
+                <div className="flex items-center justify-center w-8 h-8 bg-purple-500 rounded-full flex-shrink-0">
+                  <FiHardDrive className="text-white" size={16} />
+                </div>
+                <div className="flex-1">
+                  <h4 className="font-semibold text-purple-700 md:mb-1 text-sm md:text-base">
+                    Storage Limit Exceeded
+                  </h4>
+                  <p className="text-xs md:text-sm text-purple-600">
+                    {storageExceeded} file{storageExceeded !== 1 ? "s" : ""}{" "}
+                    exceed total storage limit of {totalStorage}MB.Remove limits
+                    by upgrading your plan
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Album Limit Exceeded Section */}
+          {albumLimitExceeded > 0 && (
+            <div className="group">
+              <div
+                className="flex items-start gap-4 p-2 md:p-4 rounded-xl border hover:shadow-md transition-all duration-200"
+                style={{
+                  background: "linear-gradient(135deg, #d7c39d1a, #d7c39d30)",
+                  borderColor: "#d7c39d",
+                }}
+              >
+                <div
+                  className="flex items-center justify-center w-8 h-8 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: "#d7c39d" }}
+                >
+                  <FiImage className="text-white" size={16} />
+                </div>
+                <div className="flex-1">
+                  <h4
+                    className="font-semibold md:mb-1 text-sm md:text-base"
+                    style={{ color: "#b8a082" }}
+                  >
+                    Album Limit Exceeded
+                  </h4>
+                  <p
+                    className="text-xs md:text-sm"
+                    style={{ color: "#9d8e6f" }}
+                  >
+                    {albumLimitExceeded} file
+                    {albumLimitExceeded !== 1 ? "s" : ""} exceed album limit of{" "}
+                    {albumLimit} images. Remove limits by upgrading your plan
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="p-3 lg:p-4 flex flex-col gap-3">
+          {/* Upgrade Button */}
+          <button
+            className="group relative px-8 py-3 rounded-xl font-semibold text-white transition-all duration-200 transform hover:scale-105 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-offset-2 overflow-hidden"
+            style={{
+              backgroundColor: "#d7c39d",
+              focusRingColor: "#d7c39d",
+            }}
+          >
+            <Link
+              href="/upgrade-plan"
+              target="_blank"
+              className="relative z-10 flex items-center justify-center gap-2"
+            >
+              <FiArrowUp size={18} />
+              Upgrade Plan
+            </Link>
+            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white to-transparent opacity-0 group-hover:opacity-20 transform -skew-x-12 group-hover:animate-pulse"></div>
+          </button>
+
+          {/* Continue Button */}
+          <button
+            onClick={onClose}
+            className="group relative px-8 py-3 rounded-xl font-semibold transition-all duration-200 transform hover:scale-105 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-offset-2 overflow-hidden border-2"
+            style={{
+              backgroundColor: "transparent",
+              borderColor: "#343148",
+              color: "#343148",
+              focusRingColor: "#343148",
+            }}
+          >
+            <span className="relative z-10">Continue with Selected Files</span>
+            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-gray-200 to-transparent opacity-0 group-hover:opacity-30 transform -skew-x-12 group-hover:animate-pulse"></div>
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
+export default RejectionModal;
+
+
+
+
+import React, { useMemo } from "react";
+import { FaExclamationTriangle } from "react-icons/fa";
+import { MdSkipNext, MdSwapHoriz, MdContentCopy } from "react-icons/md";
+import { FiFile, FiHardDrive } from "react-icons/fi";
+import Modal from "../Common/Modal";
+
+const DuplicateFilesModal = ({
+  isOpen,
+  files = [],
+  onClose,
+  onSkip,
+  onReplace,
+  onKeepBoth,
+  originalImg,
+}) => {
+  // Calculate total size
+  const totalSize = useMemo(() => {
+    return files.reduce((sum, file) => {
+      const size = originalImg ? file.originalSize : file.size;
+      return sum + (parseFloat(size) || 0);
+    }, 0);
+  }, [files, originalImg]);
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      closeOnOutsideClick={false}
+      className="bg-white rounded-2xl shadow-2xl max-w-lg w-full mx-4 overflow-hidden"
+      positionClass="items-center justify-center"
+    >
+      <div className="flex flex-col">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-primary to-[#2a2640] text-white px-3 py-3 relative">
+          <div className="flex items-center space-x-3">
+            <div className="p-2 sm:p-3 bg-secondary rounded-full flex-shrink-0">
+              <FaExclamationTriangle className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h2 className="text-lg lg:text-xl font-bold mb-1">
+                Duplicate Files Found
+              </h2>
+              <p className="text-white/80 text-sm">
+                Files already exist in this album
               </p>
             </div>
           </div>
-        )}
+        </div>
 
-        {/* Storage Usage Bar */}
-        <div className="p-4 border-b border-gray-100">
-          <div className="flex justify-between items-center mb-2">
-            <span className="text-xs font-medium text-primary">
-              Storage Used
-            </span>
-            <span className="text-xs font-bold text-primary">
-              {eventStatistics?.totalMBUsed}MB / {maxStorage}MB
-            </span>
+        {/* Content */}
+        <div className="px-4 sm:px-6 py-4 sm:py-6">
+          {/* Summary Cards */}
+          <div className="grid grid-cols-2 gap-3 sm:gap-4 mb-6">
+            <div className="bg-gradient-to-br from-primary/5 to-primary/10 rounded-xl p-3 sm:p-4 border border-primary/10">
+              <div className="flex items-center gap-2 sm:gap-3">
+                <div className="p-2 bg-secondary/20 rounded-lg">
+                  <FiFile className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-xl sm:text-2xl font-bold text-primary">
+                    {files.length}
+                  </div>
+                  <div className="text-xs sm:text-sm text-gray-600">
+                    {files.length === 1 ? "File" : "Files"}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-gradient-to-br from-secondary/10 to-secondary/20 rounded-xl p-3 sm:p-4 border border-secondary/30">
+              <div className="flex items-center gap-2 sm:gap-3">
+                <div className="p-2 bg-secondary/30 rounded-lg">
+                  <FiHardDrive className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-xl sm:text-2xl font-bold text-primary">
+                    {totalSize.toFixed(1)}
+                  </div>
+                  <div className="text-xs sm:text-sm text-gray-600">
+                    MB Total
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
-          <div className="w-full bg-gray-200 rounded-full h-2">
-            <div
-              className="h-2 rounded-full transition-all duration-300"
-              style={{
-                width: `${Math.min(usedPercentage, 100)}%`,
-                backgroundColor:
-                  usedPercentage >= 90
-                    ? "#ef4444"
-                    : usedPercentage >= 80
-                      ? "#f59e0b"
-                      : "var(--color-secondary)",
+
+          {/* Description */}
+          <div className="mb-3">
+            <p className="text-gray-600 text-center text-sm sm:text-base">
+              How would you like to proceed with these duplicate files?
+            </p>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 md:gap-3">
+            <button
+              onClick={() => {
+                onSkip();
+                onClose();
               }}
-            />
+              className="flex items-center justify-center space-x-2 p-1.5 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-colors duration-200 font-medium text-sm sm:text-base"
+            >
+              <MdSkipNext className="w-4 h-4 sm:w-5 sm:h-5" />
+              <span>Skip All</span>
+            </button>
+
+            <button
+              onClick={() => {
+                onReplace();
+                onClose();
+              }}
+              className="flex items-center justify-center space-x-2 p-1.5 bg-primary text-white rounded-xl hover:bg-[#2a2640] transition-colors duration-200 font-medium text-sm sm:text-base"
+            >
+              <MdSwapHoriz className="w-4 h-4 sm:w-5 sm:h-5" />
+              <span>Replace All</span>
+            </button>
+
+            <button
+              onClick={() => {
+                onKeepBoth();
+                onClose();
+              }}
+              className="flex items-center justify-center space-x-2 p-1.5 bg-secondary text-white rounded-xl hover:bg-[#c9b085] transition-colors duration-200 font-medium text-sm sm:text-base"
+            >
+              <MdContentCopy className="w-4 h-4 sm:w-5 sm:h-5" />
+              <span>Keep Both</span>
+            </button>
           </div>
-          <div className="text-xs text-gray-500 mt-1">
-            {Math.round(usedPercentage)}% used
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
+export default DuplicateFilesModal;
+
+
+
+// src/components/UploadManager.jsx (ULTIMATE PRODUCTION VERSION)
+"use client";
+import { useMemo, useState } from "react";
+import {
+  FiCheckCircle,
+  FiLoader,
+  FiUpload,
+  FiX,
+  FiXCircle,
+  FiClock,
+  FiZap,
+  FiWifi,
+  FiPackage,
+  FiActivity,
+  FiBarChart2,
+  FiTrendingUp,
+  FiAlertCircle,
+  FiChevronDown,
+  FiChevronUp,
+} from "react-icons/fi";
+
+const UploadManager = ({ uploadTracker, onCancel, onClose }) => {
+  const {
+    files,
+    isUploading,
+    totalProgress,
+    totalFiles,
+    results,
+    showResults,
+    networkSpeed,
+    speedQuality,
+    speedColor,
+    speedBars,
+    estimatedTimeRemaining,
+  } = uploadTracker;
+
+  // 🔥 State for expandable sections
+  const [expandedSections, setExpandedSections] = useState({
+    processing: true,
+    uploading: true,
+    pending: false,
+    failed: true,
+  });
+
+  const toggleSection = (section) => {
+    setExpandedSections((prev) => ({
+      ...prev,
+      [section]: !prev[section],
+    }));
+  };
+
+  // 🔥 Enhanced counts calculation with more details
+  const stats = useMemo(() => {
+    if (showResults || !isUploading) {
+      return {
+        total: totalFiles,
+        completed: results.successCount,
+        failed: results.failedCount,
+        processing: 0,
+        uploading: 0,
+        pending: 0,
+        inProgress: 0,
+        successRate:
+          totalFiles > 0
+            ? ((results.successCount / totalFiles) * 100).toFixed(1)
+            : 0,
+      };
+    }
+
+    const processing = files.filter((f) => f.status === "processing").length;
+    const uploading = files.filter((f) => f.status === "uploading").length;
+    const pending = files.filter(
+      (f) => f.status === "pending" || f.status === "ready"
+    ).length;
+    const failed = files.filter((f) => f.status === "failed").length;
+    const completed = results.successCount;
+
+    return {
+      total: totalFiles,
+      completed,
+      failed,
+      processing,
+      uploading,
+      pending,
+      inProgress: processing + uploading,
+      successRate:
+        totalFiles > 0 && completed > 0
+          ? ((completed / totalFiles) * 100).toFixed(1)
+          : 0,
+    };
+  }, [files, results, totalFiles, isUploading, showResults]);
+
+  // 🔥 Get files by status with sorting
+  const filesByStatus = useMemo(() => {
+    if (showResults || !isUploading) {
+      return {
+        processing: [],
+        uploading: [],
+        pending: [],
+        failed: files.filter((f) => f.status === "failed"),
+      };
+    }
+
+    return {
+      processing: files
+        .filter((f) => f.status === "processing")
+        .sort((a, b) => (b.progress || 0) - (a.progress || 0)),
+      uploading: files
+        .filter((f) => f.status === "uploading")
+        .sort((a, b) => (b.progress || 0) - (a.progress || 0)),
+      pending: files.filter(
+        (f) => f.status === "pending" || f.status === "ready"
+      ),
+      failed: files.filter((f) => f.status === "failed"),
+    };
+  }, [files, isUploading, showResults]);
+
+  // Format time
+  const formatTime = (seconds) => {
+    if (!seconds || seconds <= 0) return "Calculating...";
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+
+    if (hrs > 0) return `${hrs}h ${mins}m`;
+    if (mins > 0) return `${mins}m ${secs}s`;
+    return `${secs}s`;
+  };
+
+  // Calculate upload speed in MB/s
+  const uploadSpeedMBps = useMemo(() => {
+    if (!networkSpeed) return "0.0";
+    const mbps = parseFloat(networkSpeed);
+    const MBps = (mbps / 8).toFixed(1);
+    return MBps;
+  }, [networkSpeed]);
+
+  // Calculate total MB uploaded (approximate)
+  const totalMBProcessed = useMemo(() => {
+    if (!files.length) return "0.0";
+    const completed = files.filter(
+      (f) => f.status === "completed" || stats.completed > 0
+    );
+    const totalSize = completed.reduce((sum, f) => sum + (f.size || 0), 0);
+    return totalSize.toFixed(1);
+  }, [files, stats.completed]);
+
+  // Get color classes
+  const getSpeedColorClass = (color) => {
+    const colorMap = {
+      green: "bg-green-500",
+      yellow: "bg-yellow-500",
+      orange: "bg-orange-500",
+      red: "bg-red-500",
+    };
+    return colorMap[color] || "bg-gray-500";
+  };
+
+  const getSpeedTextColor = (color) => {
+    const colorMap = {
+      green: "text-green-400",
+      yellow: "text-yellow-400",
+      orange: "text-orange-400",
+      red: "text-red-400",
+    };
+    return colorMap[color] || "text-gray-400";
+  };
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 transition-opacity duration-300"
+        onClick={!isUploading ? onClose : undefined}
+      />
+
+      {/* Modal */}
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="w-full max-w-5xl max-h-[95vh] bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col animate-fadeIn">
+          {/* ========== HEADER ========== */}
+          <div className="bg-gradient-to-br from-primary via-[#2a2640] to-[#1f1b30] text-white px-6 py-5">
+            {/* Title Row */}
+            <div className="flex items-center justify-between mb-5">
+              <div className="flex items-center gap-3">
+                <div
+                  className={`p-3 rounded-xl backdrop-blur-sm ${
+                    isUploading
+                      ? "bg-blue-500/30 ring-2 ring-blue-400/50"
+                      : "bg-green-500/30 ring-2 ring-green-400/50"
+                  } transition-all duration-300`}
+                >
+                  {isUploading ? (
+                    <FiUpload className="w-7 h-7 animate-pulse" />
+                  ) : (
+                    <FiCheckCircle className="w-7 h-7" />
+                  )}
+                </div>
+                <div>
+                  <h1 className="font-bold text-2xl">
+                    {isUploading ? "Upload in Progress" : "Upload Complete"}
+                  </h1>
+                  <p className="text-sm text-white/80 mt-1">
+                    {isUploading
+                      ? `Processing ${stats.total} files...`
+                      : `${stats.completed} of ${stats.total} files uploaded`}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={isUploading ? onCancel : onClose}
+                className="p-2.5 hover:bg-white/10 rounded-lg transition-all duration-200 hover:scale-110"
+                title={isUploading ? "Cancel Upload" : "Close"}
+              >
+                <FiX className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* ========== STATISTICS GRID ========== */}
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
+              {/* Total Files */}
+              <StatCard
+                icon={<FiPackage className="w-5 h-5" />}
+                label="Total Files"
+                value={stats.total}
+                color="white"
+                bgOpacity="10"
+              />
+
+              {/* Completed */}
+              <StatCard
+                icon={<FiCheckCircle className="w-5 h-5" />}
+                label="Completed"
+                value={stats.completed}
+                color="green"
+                bgOpacity="20"
+                pulse={isUploading && stats.completed > 0}
+              />
+
+              {/* In Progress */}
+              {isUploading && (
+                <StatCard
+                  icon={<FiActivity className="w-5 h-5 animate-pulse" />}
+                  label="In Progress"
+                  value={stats.inProgress}
+                  color="blue"
+                  bgOpacity="20"
+                  animate
+                />
+              )}
+
+              {/* Failed */}
+              {stats.failed > 0 && (
+                <StatCard
+                  icon={<FiXCircle className="w-5 h-5" />}
+                  label="Failed"
+                  value={stats.failed}
+                  color="red"
+                  bgOpacity="20"
+                />
+              )}
+
+              {/* Success Rate */}
+              {(stats.completed > 0 || !isUploading) && (
+                <StatCard
+                  icon={<FiTrendingUp className="w-5 h-5" />}
+                  label="Success Rate"
+                  value={`${stats.successRate}%`}
+                  color={
+                    stats.successRate >= 95
+                      ? "green"
+                      : stats.successRate >= 70
+                      ? "yellow"
+                      : "red"
+                  }
+                  bgOpacity="20"
+                />
+              )}
+            </div>
+
+            {/* ========== PROGRESS BAR ========== */}
+            {isUploading && (
+              <div className="space-y-2 mb-5">
+                <div className="flex justify-between text-sm">
+                  <span className="text-white/90 font-medium flex items-center gap-2">
+                    <FiBarChart2 className="w-4 h-4" />
+                    Overall Progress
+                  </span>
+                  <span className="font-bold text-xl tabular-nums">
+                    {totalProgress}%
+                  </span>
+                </div>
+                <div className="w-full bg-white/20 rounded-full h-4 overflow-hidden backdrop-blur-sm shadow-inner">
+                  <div
+                    className="bg-gradient-to-r from-secondary via-[#d4b886] to-[#c9a76e] h-4 rounded-full transition-all duration-500 ease-out relative overflow-hidden"
+                    style={{ width: `${totalProgress}%` }}
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent animate-shimmer" />
+                    {totalProgress > 5 && (
+                      <span className="absolute inset-0 flex items-center justify-center text-xs font-bold text-white drop-shadow">
+                        {totalProgress}%
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ========== NETWORK STATS ========== */}
+            {isUploading && (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                {/* Network Speed */}
+                <div
+                  className={`bg-white/10 backdrop-blur-sm rounded-xl p-4 border-2 ${
+                    speedColor === "green"
+                      ? "border-green-400/50"
+                      : speedColor === "yellow"
+                      ? "border-yellow-400/50"
+                      : speedColor === "orange"
+                      ? "border-orange-400/50"
+                      : "border-red-400/50"
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`p-2 rounded-lg ${getSpeedColorClass(
+                          speedColor
+                        )} bg-opacity-20`}
+                      >
+                        <FiWifi
+                          className={`w-5 h-5 ${getSpeedTextColor(speedColor)}`}
+                        />
+                      </div>
+                      <div>
+                        <div className="text-xs text-white/60 mb-1">
+                          Network Speed
+                        </div>
+                        <div className="flex items-baseline gap-1">
+                          <span
+                            className={`text-2xl font-bold ${getSpeedTextColor(
+                              speedColor
+                            )}`}
+                          >
+                            {networkSpeed || "0.0"}
+                          </span>
+                          <span className="text-xs text-white/70">Mbps</span>
+                        </div>
+                        <div className="text-xs text-white/50 mt-0.5">
+                          {speedQuality || "Detecting..."} • {uploadSpeedMBps}{" "}
+                          MB/s
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Speed Bars */}
+                    <div className="flex items-center gap-1">
+                      {[1, 2, 3, 4, 5].map((bar) => (
+                        <div
+                          key={bar}
+                          className={`w-2 rounded-full transition-all duration-300 ${
+                            bar <= (speedBars || 0)
+                              ? `${getSpeedColorClass(speedColor)} ${
+                                  bar === 1
+                                    ? "h-3"
+                                    : bar === 2
+                                    ? "h-4"
+                                    : bar === 3
+                                    ? "h-5"
+                                    : bar === 4
+                                    ? "h-6"
+                                    : "h-7"
+                                }`
+                              : "bg-white/20 h-3"
+                          }`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Time Remaining */}
+                <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 border border-white/20">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-blue-500/20 rounded-lg">
+                      <FiClock className="w-5 h-5 text-blue-300" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-xs text-white/60 mb-1">
+                        Time Remaining
+                      </div>
+                      <div className="text-xl font-bold text-white">
+                        {formatTime(estimatedTimeRemaining)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Data Processed */}
+                <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 border border-white/20">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-purple-500/20 rounded-lg">
+                      <FiZap className="w-5 h-5 text-purple-300" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-xs text-white/60 mb-1">
+                        Data Processed
+                      </div>
+                      <div className="text-xl font-bold text-white">
+                        {totalMBProcessed} MB
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ========== FILE LIST ========== */}
+          <div className="flex-1 overflow-y-auto bg-gray-50">
+            {isUploading && !showResults ? (
+              <div className="p-4 space-y-3">
+                {/* Processing Section */}
+                {filesByStatus.processing.length > 0 && (
+                  <FileSection
+                    title="Processing"
+                    icon={
+                      <FiZap className="w-4 h-4 text-purple-600 animate-pulse" />
+                    }
+                    count={filesByStatus.processing.length}
+                    files={filesByStatus.processing}
+                    color="purple"
+                    expanded={expandedSections.processing}
+                    onToggle={() => toggleSection("processing")}
+                  />
+                )}
+
+                {/* Uploading Section */}
+                {filesByStatus.uploading.length > 0 && (
+                  <FileSection
+                    title="Uploading"
+                    icon={
+                      <FiLoader className="w-4 h-4 text-blue-600 animate-spin" />
+                    }
+                    count={filesByStatus.uploading.length}
+                    files={filesByStatus.uploading}
+                    color="blue"
+                    expanded={expandedSections.uploading}
+                    onToggle={() => toggleSection("uploading")}
+                  />
+                )}
+
+                {/* Pending Section */}
+                {filesByStatus.pending.length > 0 && (
+                  <FileSection
+                    title="Waiting"
+                    icon={
+                      <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+                    }
+                    count={filesByStatus.pending.length}
+                    files={filesByStatus.pending}
+                    color="gray"
+                    expanded={expandedSections.pending}
+                    onToggle={() => toggleSection("pending")}
+                    maxShow={10}
+                  />
+                )}
+
+                {/* Failed Section */}
+                {filesByStatus.failed.length > 0 && (
+                  <FileSection
+                    title="Failed"
+                    icon={<FiXCircle className="w-4 h-4 text-red-600" />}
+                    count={filesByStatus.failed.length}
+                    files={filesByStatus.failed}
+                    color="red"
+                    expanded={expandedSections.failed}
+                    onToggle={() => toggleSection("failed")}
+                  />
+                )}
+              </div>
+            ) : (
+              /* Upload Complete View */
+              <div className="p-8 text-center">
+                <div
+                  className={`w-24 h-24 ${
+                    stats.failed === 0 ? "bg-green-100" : "bg-orange-100"
+                  } rounded-full flex items-center justify-center mx-auto mb-5`}
+                >
+                  {stats.failed === 0 ? (
+                    <FiCheckCircle className="w-12 h-12 text-green-600" />
+                  ) : (
+                    <FiAlertCircle className="w-12 h-12 text-orange-600" />
+                  )}
+                </div>
+
+                <h2 className="text-2xl font-bold text-gray-800 mb-2">
+                  {stats.failed === 0
+                    ? "Upload Complete! 🎉"
+                    : "Upload Complete with Errors"}
+                </h2>
+
+                <p className="text-gray-600 mb-6">
+                  {stats.completed} files uploaded successfully
+                  {stats.failed > 0 && ` • ${stats.failed} failed`}
+                </p>
+
+                {/* Summary Stats */}
+                <div className="grid grid-cols-3 gap-4 max-w-md mx-auto mb-6">
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                    <div className="text-3xl font-bold text-green-600">
+                      {stats.completed}
+                    </div>
+                    <div className="text-xs text-green-700 mt-1">Success</div>
+                  </div>
+                  {stats.failed > 0 && (
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                      <div className="text-3xl font-bold text-red-600">
+                        {stats.failed}
+                      </div>
+                      <div className="text-xs text-red-700 mt-1">Failed</div>
+                    </div>
+                  )}
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <div className="text-3xl font-bold text-blue-600">
+                      {stats.total}
+                    </div>
+                    <div className="text-xs text-blue-700 mt-1">Total</div>
+                  </div>
+                </div>
+
+                {/* Failed Files */}
+                {filesByStatus.failed.length > 0 && (
+                  <div className="max-w-2xl mx-auto">
+                    <FileSection
+                      title="Failed Uploads"
+                      icon={<FiXCircle className="w-4 h-4 text-red-600" />}
+                      count={filesByStatus.failed.length}
+                      files={filesByStatus.failed}
+                      color="red"
+                      expanded={true}
+                      onToggle={() => {}}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* ========== FOOTER ========== */}
+          <div className="border-t bg-white px-6 py-4">
+            <div className="flex items-center justify-between">
+              <div className="text-sm text-gray-600">
+                {isUploading ? (
+                  <div className="flex items-center gap-3">
+                    <FiLoader className="w-5 h-5 animate-spin text-blue-600" />
+                    <div>
+                      <div className="font-medium text-gray-800">
+                        Upload in progress...
+                      </div>
+                      <div className="text-xs text-gray-500 mt-0.5">
+                        {stats.completed} of {stats.total} completed •{" "}
+                        {stats.inProgress} in progress
+                        {stats.failed > 0 && ` • ${stats.failed} failed`}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-3">
+                    <FiCheckCircle className="w-5 h-5 text-green-600" />
+                    <div>
+                      <div className="font-medium text-gray-800">
+                        {stats.failed === 0
+                          ? "All files uploaded successfully!"
+                          : `Upload complete with ${stats.failed} error(s)`}
+                      </div>
+                      <div className="text-xs text-gray-500 mt-0.5">
+                        {stats.completed} successful • {totalMBProcessed} MB
+                        processed
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex gap-2">
+                {isUploading ? (
+                  <button
+                    onClick={onCancel}
+                    className="px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-all duration-200 flex items-center gap-2 hover:shadow-lg active:scale-95"
+                  >
+                    <FiX className="w-4 h-4" />
+                    Cancel Upload
+                  </button>
+                ) : (
+                  <button
+                    onClick={onClose}
+                    className="px-6 py-2.5 bg-primary hover:bg-[#2a2640] text-white rounded-lg font-medium transition-all duration-200 hover:shadow-lg active:scale-95"
+                  >
+                    Close
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Animations */}
+      <style jsx>{`
+        @keyframes shimmer {
+          0% {
+            transform: translateX(-100%);
+          }
+          100% {
+            transform: translateX(100%);
+          }
+        }
+        .animate-shimmer {
+          animation: shimmer 2s infinite;
+        }
+        @keyframes fadeIn {
+          from {
+            opacity: 0;
+            transform: scale(0.95);
+          }
+          to {
+            opacity: 1;
+            transform: scale(1);
+          }
+        }
+        .animate-fadeIn {
+          animation: fadeIn 0.2s ease-out;
+        }
+      `}</style>
+    </>
+  );
+};
+
+// ========== STAT CARD COMPONENT ==========
+const StatCard = ({ icon, label, value, color, bgOpacity, pulse, animate }) => {
+  const colorClasses = {
+    white: {
+      bg: `bg-white/${bgOpacity}`,
+      border: "border-white/30",
+      text: "text-white",
+      icon: "text-white/90",
+    },
+    green: {
+      bg: `bg-green-500/${bgOpacity}`,
+      border: "border-green-400/40",
+      text: "text-green-200",
+      icon: "text-green-300",
+    },
+    blue: {
+      bg: `bg-blue-500/${bgOpacity}`,
+      border: "border-blue-400/40",
+      text: "text-blue-200",
+      icon: "text-blue-300",
+    },
+    red: {
+      bg: `bg-red-500/${bgOpacity}`,
+      border: "border-red-400/40",
+      text: "text-red-200",
+      icon: "text-red-300",
+    },
+    yellow: {
+      bg: `bg-yellow-500/${bgOpacity}`,
+      border: "border-yellow-400/40",
+      text: "text-yellow-200",
+      icon: "text-yellow-300",
+    },
+  };
+
+  const classes = colorClasses[color] || colorClasses.white;
+
+  return (
+    <div
+      className={`${classes.bg} ${
+        classes.border
+      } border backdrop-blur-sm rounded-xl p-3 transition-all duration-300 ${
+        pulse ? "animate-pulse" : ""
+      } ${animate ? "hover:scale-105" : ""}`}
+    >
+      <div className="flex items-center gap-2 mb-1">
+        <div className={classes.icon}>{icon}</div>
+        <div className={`text-xs ${classes.text} font-medium`}>{label}</div>
+      </div>
+      <div className="text-2xl font-bold text-white tabular-nums">{value}</div>
+    </div>
+  );
+};
+
+// ========== FILE SECTION COMPONENT ==========
+const FileSection = ({
+  title,
+  icon,
+  count,
+  files,
+  color,
+  expanded,
+  onToggle,
+  maxShow = 20,
+}) => {
+  const colorClasses = {
+    purple: {
+      bg: "bg-purple-50",
+      border: "border-purple-200",
+      header: "bg-purple-100",
+      text: "text-purple-700",
+    },
+    blue: {
+      bg: "bg-blue-50",
+      border: "border-blue-200",
+      header: "bg-blue-100",
+      text: "text-blue-700",
+    },
+    gray: {
+      bg: "bg-gray-50",
+      border: "border-gray-200",
+      header: "bg-gray-100",
+      text: "text-gray-700",
+    },
+    red: {
+      bg: "bg-red-50",
+      border: "border-red-200",
+      header: "bg-red-100",
+      text: "text-red-700",
+    },
+  };
+
+  const classes = colorClasses[color] || colorClasses.gray;
+  const displayFiles = expanded ? files.slice(0, maxShow) : [];
+  const hasMore = files.length > maxShow;
+
+  return (
+    <div className={`border ${classes.border} rounded-xl overflow-hidden`}>
+      {/* Header */}
+      <button
+        onClick={onToggle}
+        className={`w-full ${classes.header} px-4 py-3 flex items-center justify-between hover:opacity-80 transition-opacity`}
+      >
+        <div className="flex items-center gap-3">
+          {icon}
+          <span className={`font-semibold ${classes.text}`}>
+            {title} ({count})
+          </span>
+        </div>
+        {expanded ? (
+          <FiChevronUp className={`w-5 h-5 ${classes.text}`} />
+        ) : (
+          <FiChevronDown className={`w-5 h-5 ${classes.text}`} />
+        )}
+      </button>
+
+      {/* File List */}
+      {expanded && (
+        <div className={`${classes.bg} p-3 space-y-2`}>
+          {displayFiles.map((file) => (
+            <FileItem key={file.hash} file={file} />
+          ))}
+          {hasMore && (
+            <div className="text-center py-2 text-sm text-gray-500 bg-white/50 rounded-lg">
+              +{files.length - maxShow} more files...
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ========== FILE ITEM COMPONENT ==========
+const FileItem = ({ file }) => {
+  const getStatusConfig = () => {
+    switch (file.status) {
+      case "processing":
+        return {
+          icon: <FiZap className="w-4 h-4 text-purple-600 animate-pulse" />,
+          bgColor: "bg-purple-50 border-purple-200",
+          progressColor: "bg-purple-600",
+          label: "Processing",
+          showProgress: true,
+        };
+      case "uploading":
+        return {
+          icon: <FiLoader className="w-4 h-4 text-blue-600 animate-spin" />,
+          bgColor: "bg-blue-50 border-blue-200",
+          progressColor: "bg-blue-600",
+          label: "Uploading",
+          showProgress: true,
+        };
+      case "pending":
+      case "ready":
+        return {
+          icon: (
+            <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+          ),
+          bgColor: "bg-gray-50 border-gray-200",
+          progressColor: "bg-gray-400",
+          label: "Waiting",
+          showProgress: false,
+        };
+      case "failed":
+        return {
+          icon: <FiXCircle className="w-4 h-4 text-red-600" />,
+          bgColor: "bg-red-50 border-red-200",
+          progressColor: "bg-red-600",
+          label: "Failed",
+          showProgress: false,
+        };
+      default:
+        return {
+          icon: <FiCheckCircle className="w-4 h-4 text-green-600" />,
+          bgColor: "bg-green-50 border-green-200",
+          progressColor: "bg-green-600",
+          label: "Ready",
+          showProgress: false,
+        };
+    }
+  };
+
+  const config = getStatusConfig();
+  const progress = file.progress || 0;
+
+  return (
+    <div
+      className={`border ${config.bgColor} rounded-lg p-3 transition-all duration-200 hover:shadow-md`}
+    >
+      <div className="flex items-center gap-3">
+        {/* Icon */}
+        <div className="flex-shrink-0">{config.icon}</div>
+
+        {/* File Info */}
+        <div className="flex-1 min-w-0">
+          <div
+            className="font-medium text-sm text-gray-800 truncate"
+            title={file.originalName}
+          >
+            {file.originalName}
+          </div>
+          <div className="flex items-center gap-2 mt-1 flex-wrap">
+            <span className="text-xs px-2 py-0.5 rounded-full bg-white border text-gray-700 font-medium">
+              {config.label}
+            </span>
+            {file.size && (
+              <span className="text-xs text-gray-500">
+                {file.size.toFixed(2)} MB
+              </span>
+            )}
+            {file.error && (
+              <span
+                className="text-xs text-red-600 truncate max-w-[200px]"
+                title={file.error}
+              >
+                • {file.error}
+              </span>
+            )}
           </div>
         </div>
 
-        {/* Statistics Grid */}
-        <div className="p-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div
-              className="flex items-center gap-2 p-2 rounded-lg"
-              style={{ backgroundColor: "#f8f9fa" }}
-            >
-              <HiOutlineCalendar className="text-lg text-secondary" />
-              <div>
-                <p className="text-xs text-gray-500">Events</p>
-                <p className="text-sm font-semibold text-primary">
-                  {eventStatistics?.totalEvents}
-                </p>
+        {/* Progress */}
+        {config.showProgress && (
+          <div className="flex items-center gap-2 w-32 flex-shrink-0">
+            <div className="flex-1 bg-gray-200 rounded-full h-2 overflow-hidden">
+              <div
+                className={`${config.progressColor} h-2 rounded-full transition-all duration-300 relative`}
+                style={{ width: `${progress}%` }}
+              >
+                {progress > 0 && progress < 100 && (
+                  <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent animate-shimmer" />
+                )}
               </div>
             </div>
-
-            <div
-              className="flex items-center gap-2 p-2 rounded-lg"
-              style={{ backgroundColor: "#f8f9fa" }}
-            >
-              <HiOutlinePhotograph className="text-lg text-secondary" />
-              <div>
-                <p className="text-xs text-gray-500">Photos</p>
-                <p className="text-sm font-semibold text-primary">
-                  {eventStatistics?.totalPhotos}
-                </p>
-              </div>
-            </div>
-
-            <div
-              className="flex items-center gap-2 p-2 rounded-lg"
-              style={{ backgroundColor: "#f8f9fa" }}
-            >
-              <HiOutlineCollection className="text-lg text-secondary" />
-              <div>
-                <p className="text-xs text-gray-500">Albums</p>
-                <p className="text-sm font-semibold text-primary">
-                  {eventStatistics?.totalAlbums}
-                </p>
-              </div>
-            </div>
-
-            <div
-              className="flex items-center gap-2 p-2 rounded-lg"
-              style={{ backgroundColor: "#f8f9fa" }}
-            >
-              <HiOutlineDatabase className="text-lg text-secondary" />
-              <div>
-                <p className="text-xs text-gray-500">Storage</p>
-                <p className="text-sm font-semibold text-primary">
-                  {eventStatistics?.totalMBUsed}MB
-                </p>
-              </div>
-            </div>
+            <span className="text-xs font-bold text-gray-700 w-10 text-right tabular-nums">
+              {progress}%
+            </span>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
 };
 
-const Navbar = () => {
-  const router = useRouter();
-  const [isPopupOpen, setIsPopupOpen] = useState(false);
-  const [showStorageInfo, setShowStorageInfo] = useState(false);
-  const modalRef = useRef(null);
-  const { user, onePackage, refreshPackage, isRefreshingPackage } =
-    useRootData();
-  const eventStatistics = onePackage?.eventStatistics;
-  const handleLogout = async () => {
-    try {
-      const { logOutUser } =
-        await import("@/src/redux/features/auth/authThunks");
-      await logOutUser(router, {});
-    } catch (error) {
-      console.error("Error saving data:", error);
-    }
-  };
-
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (modalRef.current && !modalRef.current.contains(event.target)) {
-        setIsPopupOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
-  }, [isPopupOpen]);
-  // Calculate storage usage percentage using real package limit
-  const maxStorage = onePackage?.packageId?.totalPhotoMB;
-  const usedPercentage =
-    maxStorage > 0 ? (eventStatistics?.totalMBUsed / maxStorage) * 100 : 0;
-  const getStorageIndicatorColor = () => {
-    if (usedPercentage >= 90) return "text-red-500";
-    if (usedPercentage >= 80) return "text-yellow-500";
-    return "text-green-500";
-  };
-
-  return (
-    <>
-      <nav className="flex justify-between items-start sm:items-center mb-2.5 w-auto mt-1">
-        <div className="mb-3 sm:mb-0">
-          <div className="flex items-center gap-2">
-            <h1 className="text-primary md:text-lg lg:text-2xl font-bold">
-              Hello {user?.fullName}! 👋
-            </h1>
-            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-          </div>
-          <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4">
-            <p className="text-xs md:text-sm text-gray-500">
-              Welcome to your FindMyPhotos dashboard...
-            </p>
-            <div className="flex items-center gap-2 text-xs md:text-sm">
-              <span className="text-gray-500">Storage:</span>
-              <span className="font-medium text-primary">
-                {eventStatistics?.totalMBUsed}MB /{" "}
-                {onePackage?.packageId?.totalPhotoMB}MB
-              </span>
-              <span className="text-gray-400">
-                ({onePackage?.packageId?.packageName}
-                {onePackage?.packageId?.isTrial ? " - Trial" : ""})
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex sm:flex-row flex-col items-center gap-2 relative">
-          {/* Storage Info Button */}
-          <button
-            onClick={() => setShowStorageInfo(true)}
-            className="flex items-center gap-2 sm:p-2 sm:hover:bg-gray-50 rounded-full transition-all duration-300 hover:shadow-sm group sm:order-none order-2"
-            title="Storage Info"
-          >
-            <div className="relative">
-              <HiOutlineDatabase
-                className={`text-2xl ${getStorageIndicatorColor()} transition-colors duration-300`}
-              />
-              {usedPercentage >= 80 && (
-                <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full border border-white animate-pulse"></div>
-              )}
-            </div>
-            <span className="text-xs font-medium text-gray-700 group-hover:text-primary transition-colors duration-300">
-              {Math.round(usedPercentage)}%
-            </span>
-          </button>
-          <button
-            onClick={refreshPackage}
-            disabled={isRefreshingPackage}
-            className="p-1 hover:bg-gray-200 rounded-full transition-colors duration-200 disabled:opacity-50"
-            title="Refresh Storage Data"
-          >
-            <MdRefresh
-              className={`text-lg text-primary ${
-                isRefreshingPackage ? "animate-spin" : ""
-              }`}
-            />
-          </button>
-
-          {/* User Profile Button */}
-          <button
-            onClick={() => setIsPopupOpen(!isPopupOpen)}
-            className="flex items-center gap-2 sm:p-2 sm:hover:bg-gray-50 rounded-full transition-all duration-300 hover:shadow-sm group"
-          >
-            {user?.image ? (
-              <Image
-                src={user.image}
-                alt="Profile"
-                width={64}
-                height={64}
-                className="w-8 h-8 rounded-xl object-cover shadow-md"
-              />
-            ) : (
-              <div className="w-8 h-8 bg-gradient-to-br from-secondary to-primary rounded-xl flex items-center justify-center text-white text-xl font-bold shadow-md">
-                {user?.fullName?.[0]?.toUpperCase() || "F"}
-              </div>
-            )}
-            <span className="hidden xl:inline text-sm font-medium text-gray-700 group-hover:text-primary transition-colors duration-300">
-              {user?.fullName}
-            </span>
-          </button>
-
-          {/* User Popup Menu */}
-          {isPopupOpen && (
-            <div
-              ref={modalRef}
-              className="absolute z-50 top-full right-0 mt-2 w-64 bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden animate-fadeIn"
-            >
-              <div className="absolute -top-2 right-4 w-4 h-4 bg-white transform rotate-45 border-t border-l border-gray-100"></div>
-              <div className="p-4 border-b border-gray-100">
-                <div className="flex items-center gap-3">
-                  {user?.image ? (
-                    <Image
-                      src={user.image}
-                      alt="Profile"
-                      width={64}
-                      height={64}
-                      className="w-8 h-8 rounded-xl object-cover shadow-md"
-                    />
-                  ) : (
-                    <div className="w-8 h-8 bg-gradient-to-br from-secondary to-primary rounded-xl flex items-center justify-center text-white text-xl font-bold shadow-md">
-                      {user?.fullName?.[0]?.toUpperCase() || "F"}
-                    </div>
-                  )}
-                  <div>
-                    <p className="font-medium text-gray-900">
-                      {user?.fullName}
-                    </p>
-                    <p className="text-xs text-gray-500">Online</p>
-                  </div>
-                </div>
-              </div>
-              <ul className="py-1">
-                <li>
-                  <Link
-                    href="/my-account"
-                    className="flex items-center px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 transition-colors duration-150 group"
-                  >
-                    <LuUserCheck className="text-xl text-secondary mr-3 group-hover:scale-110 transition-transform duration-200" />
-                    <span>My Account</span>
-                  </Link>
-                </li>
-                <li className="border-t border-gray-100">
-                  <button
-                    className="flex items-center w-full px-4 py-3 text-sm text-red-600 hover:bg-red-50 transition-colors duration-150 group"
-                    onClick={handleLogout}
-                    type="button"
-                  >
-                    <RiLogoutCircleRLine className="text-xl text-red-600 mr-3 group-hover:scale-110 transition-transform duration-200" />
-                    <span>Logout</span>
-                  </button>
-                </li>
-              </ul>
-            </div>
-          )}
-        </div>
-      </nav>
-
-      {/* Storage Info Modal */}
-      {showStorageInfo && (
-        <StorageInfo
-          eventStatistics={eventStatistics}
-          onClose={() => setShowStorageInfo(false)}
-          maxStorage={maxStorage}
-        />
-      )}
-    </>
-  );
-};
-
-export default Navbar;
+export default UploadManager;
