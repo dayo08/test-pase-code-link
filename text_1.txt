@@ -1,386 +1,255 @@
 import mongoose from "mongoose";
 import HTTP from "../../constants/httpStatusCodes.js";
 import constants from "../../constants/messageConstants.js";
-import EnterprisePackage from "../../models/admin/enterprisePackage.js";
 import ClientPackage from "../../models/enterprise/clientPackage.js";
-import PackageHistory from "../../models/enterprise/packageHistory.js";
-import {
-  initiatePackage,
-  verifyPackage,
-} from "../../services/razorpay.service.js";
-import { getPackagePricing } from "../../utils/currencyUtils.js";
-import { AccountStatus, PaymentStatus } from "../../utils/enums/index.js";
+import Event from "../../models/enterprise/event.js";
+import UserEventVisitHistory from "../../models/user/userEventVisitHistory.js";
+import { EventStatus } from "../../utils/enums/index.js";
 import { jsonOne, throwHttpError } from "../../utils/generalUtils.js";
-import { getPackageWithUsage } from "../../utils/util.package.js";
 
-/*** Get One ClientPackage with Aggregated Event Stats ***/
-const getOneClientPackage = async (req, res, next) => {
+const getDashboardData = async (req, res, next) => {
   try {
     const { id: enterpriseClientId } = req["tokenPayload"];
-    const result = await getPackageWithUsage(enterpriseClientId);
 
-    if (!result) {
-      return throwHttpError(
-        "BAD_REQUEST",
-        "No active package found",
-        HTTP.BAD_REQUEST,
-      );
-    }
-
-    // Format the response as needed
-    const response = {
-      _id: result._id,
-      packageId: result.packageId,
-      startDate: result.startDate,
-      endDate: result.endDate,
-      isTrial: result.isTrial,
-      isActive: result.isActive,
-      status: result.status,
-      eventStatistics: result.eventStatistics,
-      eventsDetails: result.eventsDetails,
-    };
-    return jsonOne(res, HTTP.SUCCESS, response);
-  } catch (error) {
-    next(error);
-  }
-};
-
-/*** Get Upgrade Packages List ***/
-const getUpgradePackagesList = async (req, res, next) => {
-  try {
-    const { id: enterpriseClientId } = req["tokenPayload"];
-    const currency = req.currency;
-
-    // 1. Get current active package
+    // 1. Get Current Active Package
     const currentPackage = await ClientPackage.findOne({
       enterpriseClientId,
+      // isActive: true,
+      // status: ClientPackageStatus.ACTIVE,
     })
-      .populate("eventsDetails", "totalMBUsed totalPhotos")
+      .populate(
+        "packageId",
+        "packageName totalPhotoMB eventLimit imageLimitPerAlbum validityInDays"
+      )
       .lean();
 
     if (!currentPackage) {
       return throwHttpError(
-        "BAD_REQUEST",
-        constants.package.noActive,
-        HTTP.NOT_FOUND,
+        "eventId",
+        constants.event.activePackage,
+        HTTP.BAD_REQUEST
       );
     }
 
-    // Get the amount already paid by the client
-    const amountAlreadyPaid = currentPackage.paymentDetails?.amountPaid || 0;
-
-    // 2. Calculate total MB used from all events
-    const totalMBUsed = currentPackage.eventsDetails.reduce(
-      (sum, event) => sum + (event.totalMBUsed || 0),
-      0,
-    );
-
-    // 3. Find the max totalPhotos in any event
-    const maxTotalPhotos = currentPackage.eventsDetails.reduce(
-      (max, event) => Math.max(max, event.totalPhotos || 0),
-      0,
-    );
-
-    // 4. Calculate remaining days
-    const startDate = new Date(currentPackage.startDate);
-    const endDate = new Date(currentPackage.endDate);
-
-    const currentValidityInDays = Math.ceil(
-      (endDate - startDate) / (1000 * 60 * 60 * 24),
-    );
-
-    const daysRemaining = Math.ceil(
-      (endDate - new Date()) / (1000 * 60 * 60 * 24),
-    );
-    const isExpired = daysRemaining <= 0;
-
-    let validityCondition = {};
-
-    if (!isExpired) {
-      // Plan is active → only show higher plans
-      validityCondition = { validityInDays: { $gt: currentValidityInDays } };
-    }
-
-    const upgradePackages = await EnterprisePackage.find({
-      $and: [
-        validityCondition,
-        { totalPhotoMB: { $gt: totalMBUsed } },
-        { imageLimitPerAlbum: { $gt: maxTotalPhotos } },
-      ],
-      _id: { $ne: currentPackage.packageId },
-      status: AccountStatus.ACTIVATE,
-      deletedAt: null,
-      isFreePackage: false,
-    })
-      .sort({ totalPhotoMB: 1 })
-      .lean();
-
-    const formattedPackages = upgradePackages
-      .map((pkg) => {
-        const pricing = getPackagePricing(pkg.pricing, currency);
-        const { pricing: pricingObj, ...cleanPkg } = pkg;
-
-        return {
-          ...cleanPkg,
-          cost: pricing.packageCost, // ₹200
-          originalPrice: pricing.packageOriginalPrice, // ₹250
-          discount: pricing.packageDiscount, // 20
-          discountAmount: pricing.packageDiscountAmount, // ₹50
-          symbol: pricing.symbol,
-          currency: currency,
-        };
-      })
-      .filter((pkg) => pkg.cost > amountAlreadyPaid); // Show only plans with cost > amount already paid
-
-    return jsonOne(res, HTTP.SUCCESS, formattedPackages);
-  } catch (error) {
-    next(error);
-  }
-};
-
-/*** Package Management - Unified Initiate (Upgrade/Renew) ***/
-const initiatePackageAction = async (req, res, next) => {
-  try {
-    const { id: enterpriseClientId } = req.tokenPayload;
-    const { newPackageId, actionType } = req.body; // actionType: 'upgrade' or 'renew'
-    const currency = req.currency;
-
-    const result = await initiatePackage(
-      enterpriseClientId,
-      newPackageId,
-      actionType,
-      currency,
-    );
-
-    // 8. Return order details to client
-    return jsonOne(res, HTTP.SUCCESS, result);
-  } catch (error) {
-    next(error);
-  }
-};
-
-/*** Verify Package Action (Upgrade/Renew) ***/
-const verifyPackageAction = async (req, res, next) => {
-  try {
-    const { razorpay_payment_id, razorpay_order_id, razorpay_signature } =
-      req.body;
-    const { id: enterpriseClientId } = req.tokenPayload;
-
-    const result = await verifyPackage(
-      enterpriseClientId,
-      razorpay_payment_id,
-      razorpay_order_id,
-      razorpay_signature,
-    );
-    return jsonOne(res, HTTP.SUCCESS, {}, result.message);
-  } catch (err) {
-    next(err);
-  }
-};
-
-/*** * Get Complete Package Dashboard */
-const getCompletePackageDashboard = async (req, res, next) => {
-  try {
-    const { id: enterpriseClientId } = req["tokenPayload"];
-
-    // ============ PARALLEL EXECUTION ============
-    const [currentPackage, paymentHistory] = await Promise.all([
-      // Query 1: Current Package
-      ClientPackage.findOne(
-        { enterpriseClientId, isActive: true },
-        {
-          packageId: 1,
-          paymentDetails: 1,
-          startDate: 1,
-          endDate: 1,
-          eventsDetails: 1,
-          isActive: 1,
-          status: 1,
-        },
-      )
-        .populate("packageId", "-pricing")
-        .lean(),
-
-      // Query 2: Payment History (Aggregation)
-      PackageHistory.aggregate([
+    // Combined aggregation query for events data and recent events
+    const [eventsData] = await Promise.all([
+      Event.aggregate([
         {
           $match: {
             enterpriseClientId: new mongoose.Types.ObjectId(enterpriseClientId),
+            deletedAt: null,
           },
         },
-        { $sort: { createdAt: -1 } },
         {
-          $lookup: {
-            from: "enterprisepackages",
-            localField: "previousPackageId",
-            foreignField: "_id",
-            as: "previousPackage",
+          $facet: {
+            // Stats calculation
+            stats: [
+              {
+                $group: {
+                  _id: null,
+                  totalEvents: { $sum: 1 },
+                  activeEvents: {
+                    $sum: {
+                      $cond: [{ $eq: ["$status", EventStatus.ACTIVE] }, 1, 0],
+                    },
+                  },
+                  archivedEvents: {
+                    $sum: {
+                      $cond: [{ $eq: ["$status", EventStatus.ARCHIVED] }, 1, 0],
+                    },
+                  },
+                  draftEvents: {
+                    $sum: {
+                      $cond: [{ $eq: ["$status", EventStatus.DRAFT] }, 1, 0],
+                    },
+                  },
+                  totalMBUsed: { $sum: "$totalMBUsed" },
+                  totalAlbums: { $sum: "$totalAlbums" },
+                  totalPhotos: { $sum: "$totalPhotos" },
+                },
+              },
+            ],
+            // Recent events
+            recent: [
+              { $sort: { createdAt: -1 } },
+              {
+                $project: {
+                  eventName: 1,
+                  eventStartDate: 1,
+                  createdAt: 1,
+                  totalAlbums: 1,
+                  totalPhotos: 1,
+                  totalMBUsed: 1,
+                  status: 1,
+                  archivedAt: 1,
+                },
+              },
+            ],
           },
         },
         {
           $project: {
-            action: 1,
-            "packageDetails.packageName": 1,
-            usageAtAction: 1,
-            paymentDetails: 1,
-            isActive: 1,
-            startDate: 1,
-            endDate: 1,
-            notes: 1,
-            previousPackageId: {
-              packageName: {
-                $ifNull: [
-                  { $arrayElemAt: ["$previousPackage.packageName", 0] },
-                  "None",
-                ],
-              },
-            },
+            stats: { $arrayElemAt: ["$stats", 0] },
+            recentEvents: "$recent",
           },
         },
       ]),
     ]);
 
-    if (!currentPackage) {
-      return throwHttpError(
-        "BAD_REQUEST",
-        "No active package found",
-        HTTP.BAD_REQUEST,
-      );
-    }
-
-    // ============ 3. Calculate days left ============
-    const daysLeft = Math.max(
-      0,
-      Math.ceil(
-        (new Date(currentPackage.endDate) - new Date()) / (1000 * 60 * 60 * 24),
-      ),
-    );
-
-    return jsonOne(res, HTTP.SUCCESS, {
-      currentPackage: { ...currentPackage, daysLeft },
-      paymentHistory,
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-const cancelPaymentAttempt = async (req, res, next) => {
-  try {
-    const { razorpayOrderId } = req.body;
-    const { id: enterpriseClientId } = req.tokenPayload;
-
-    const pendingAction = await PackageHistory.findOne({
-      enterpriseClientId,
-      "paymentDetails.razorpayOrderId": razorpayOrderId,
-      "paymentDetails.paymentStatus": PaymentStatus.PENDING,
-    });
-
-    if (pendingAction) {
-      await PackageHistory.findByIdAndUpdate(pendingAction._id, {
-        $set: {
-          "paymentDetails.paymentStatus": PaymentStatus.FAILED,
-          "paymentDetails.failureReason": "User aborted payment",
-          notes: "Payment cancelled by user",
-          systemNotes: `Payment aborted ${new Date().toISOString()}`,
-        },
-      });
-    }
-    return jsonOne(res, HTTP.SUCCESS, {}, "Payment attempt cancelled");
-  } catch (error) {
-    next(error);
-  }
-};
-
-export default {
-  getOneClientPackage,
-  getUpgradePackagesList,
-  initiatePackageAction,
-  verifyPackageAction,
-  getCompletePackageDashboard,
-  cancelPaymentAttempt,
-};
-
-
-
-const getPackageWithUsage = async (enterpriseClientId) => {
-  const result = await ClientPackage.aggregate([
-    {
-      $match: {
-        enterpriseClientId: new mongoose.Types.ObjectId(enterpriseClientId),
-      },
-    },
-    {
-      $lookup: {
-        from: "enterprisepackages",
-        localField: "packageId",
-        foreignField: "_id",
-        as: "packageId",
-      },
-    },
-    { $unwind: "$packageId" },
-    {
-      $lookup: {
-        from: "enterpriseclientevents",
-        localField: "eventsDetails",
-        foreignField: "_id",
-        as: "events",
-      },
-    },
-    {
-      $addFields: {
-        eventStatistics: {
-          totalEvents: { $size: "$events" },
-          totalPhotos: { $sum: "$events.totalPhotos" },
-          totalMBUsed: { $round: [{ $sum: "$events.totalMBUsed" }, 2] },
-          totalAlbums: { $sum: "$events.totalAlbums" },
-        },
-      },
-    },
-    { $limit: 1 },
-  ]);
-  return result.length > 0 ? result[0] : null;
-};
-
-
-
-
-/** Get package price for specific currency */
-export const getPackagePricing = (pricingList, currency = "USD") => {
-  const pricing = pricingList[currency];
-
-  if (!pricing) {
-    return {
-      packageCost: 0,
-      packageOriginalPrice: 0,
-      packageDiscount: 0,
-      packageDiscountAmount: 0,
-      symbol: symbols.USD,
+    // Extract data from aggregation results
+    const stats = eventsData[0]?.stats || {
+      totalEvents: 0,
+      activeEvents: 0,
+      archivedEvents: 0,
+      draftEvents: 0,
+      totalMBUsed: 0,
+      totalAlbums: 0,
+      totalPhotos: 0,
     };
+
+    const recentEventsData = eventsData[0]?.recentEvents || [];
+
+    // Calculate remaining days
+    const now = new Date();
+    const endDate = new Date(currentPackage.endDate);
+    const daysRemaining = Math.ceil((endDate - now) / (1000 * 60 * 60 * 24));
+
+    // Prepare Dashboard Response
+    const dashboardData = {
+      currentPackage: {
+        packageName: currentPackage.packageId.packageName,
+        totalPhotoMB: currentPackage.packageId.totalPhotoMB,
+        eventLimit: currentPackage.packageId.eventLimit,
+        imageLimitPerAlbum: currentPackage.packageId.imageLimitPerAlbum,
+        validityInDays: currentPackage.packageId.validityInDays,
+
+        status: currentPackage.status.toLowerCase(),
+        startDate: currentPackage.startDate,
+        endDate: currentPackage.endDate,
+        daysRemaining: Math.max(0, daysRemaining),
+        isTrial: currentPackage.isTrial,
+        _id: currentPackage.packageId._id,
+      },
+      usage: {
+        totalMBUsed: Math.max(0, Math.round(stats.totalMBUsed * 100) / 100),
+        totalPhotosUploaded: Math.max(0, stats.totalPhotos),
+        totalAlbumsCreated: Math.max(0, stats.totalAlbums),
+        totalEventsCreated: Math.max(0, stats.totalEvents),
+        activeEvents: Math.max(0, stats.activeEvents),
+        archivedEvents: Math.max(0, stats.archivedEvents),
+        draftEvents: Math.max(0, stats.draftEvents),
+      },
+      storageUsage: [
+        {
+          name: "Used Storage",
+          value: Math.max(0, Math.round(stats.totalMBUsed * 100) / 100),
+          color: "#343148",
+        },
+        {
+          name: "Available Storage",
+          value: Math.max(
+            0,
+            Math.round(
+              (currentPackage.packageId.totalPhotoMB - stats.totalMBUsed) * 100
+            ) / 100
+          ),
+          color: "#d7c39d",
+        },
+      ],
+      recentEvents: recentEventsData.map((event) => ({
+        name: event.eventName,
+        date: event.eventStartDate || event.createdAt,
+        albums: Math.max(0, event.totalAlbums),
+        photos: Math.max(0, event.totalPhotos),
+        status: event.status,
+        mbUsed: Math.max(0, Math.round(event.totalMBUsed * 100) / 100),
+        _id: event._id,
+      })),
+      usagePercentages: {
+        storage: Math.min(
+          100,
+          Math.max(
+            0,
+            Math.round(
+              (stats.totalMBUsed / currentPackage.packageId.totalPhotoMB) * 100
+            )
+          )
+        ),
+        events: Math.min(
+          100,
+          Math.max(
+            0,
+            Math.round(
+              (stats.totalEvents / currentPackage.packageId.eventLimit) * 100
+            )
+          )
+        ),
+        avgImagesPerAlbum: Math.min(
+          100,
+          Math.max(
+            0,
+            stats.totalAlbums > 0
+              ? Math.round(
+                  (stats.totalPhotos /
+                    stats.totalAlbums /
+                    currentPackage.packageId.imageLimitPerAlbum) *
+                    100
+                )
+              : 0
+          )
+        ),
+      },
+    };
+
+    return jsonOne(res, HTTP.SUCCESS, dashboardData);
+  } catch (error) {
+    next(error);
   }
-
-  const packageCost = pricing.cost || 0; // ₹200 (user pays)
-  const packageDiscount = pricing.discount || 0; // 20%
-  const symbol = pricing.symbol;
-
-  // Calculate original price from cost + discount
-  // Formula: originalPrice = cost / (1 - discount/100)
-  // Example: ₹200 / (1 - 20/100) = ₹200 / 0.8 = ₹250
-  const packageOriginalPrice =
-    packageDiscount > 0
-      ? Math.round(packageCost / (1 - packageDiscount / 100))
-      : packageCost;
-
-  const packageDiscountAmount = packageOriginalPrice - packageCost;
-
-  return {
-    packageCost, // ₹200 (user payment)
-    packageOriginalPrice, // ₹250 (displayed crossed)
-    packageDiscount, // 20 (percentage)
-    packageDiscountAmount, // ₹50 (savings)
-    symbol, // ₹ or $
-  };
 };
 
+const getEventVisitStats = async (req, res, next) => {
+  try {
+    const { eventId } = req.params;
 
+    // Aggregate pipeline to get all statistics in a single query
+    const result = await UserEventVisitHistory.aggregate([
+      // Match after unwind is sufficient since we have an index
+      { $unwind: "$visitedEvents" },
+      {
+        $match: {
+          "visitedEvents.eventId": new mongoose.Types.ObjectId(eventId),
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalVisitors: { $sum: 1 },
+          totalSelfiesTaken: {
+            $sum: { $size: "$visitedEvents.selfies" },
+          },
+          lastUpdated: { $min: "$visitedEvents.firstVisitedAt" },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          totalVisitors: 1,
+          totalSelfiesTaken: 1,
+          lastUpdated: 1,
+        },
+      },
+    ]);
 
+    // If no results, return zeros
+    const stats = result[0] || {
+      totalVisitors: 0,
+      totalSelfiesTaken: 0,
+      lastUpdated: null,
+    };
+    return jsonOne(res, HTTP.SUCCESS, stats);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export default { getDashboardData, getEventVisitStats };
