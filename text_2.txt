@@ -1,1235 +1,424 @@
+"use client";
+import { useRootData } from "@/src/context/rootContext";
+import Image from "next/image";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 import {
-  AbortMultipartUploadCommand,
-  CompleteMultipartUploadCommand,
-  CreateMultipartUploadCommand,
-  PutObjectCommand,
-  UploadPartCommand,
-} from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import mongoose from "mongoose";
-import config from "../../config/config.js";
-import HTTP from "../../constants/httpStatusCodes.js";
-import constants from "../../constants/messageConstants.js";
-import { b2Client } from "../../middlewares/multer.js";
-import Album from "../../models/enterprise/album.js";
-import ClientPackage from "../../models/enterprise/clientPackage.js";
-import Event from "../../models/enterprise/event.js";
-import UserEventVisitHistory from "../../models/user/userEventVisitHistory.js";
-import { pythonAPI } from "../../services/pythonAPIManager.js";
-import { EventStatus } from "../../utils/enums/index.js";
-import {
-  generateSlug,
-  jsonAll,
-  jsonOne,
-  throwHttpError,
-} from "../../utils/generalUtils.js";
-import { getSingleData } from "../../utils/helper/index.js";
-import { generateOtp, generateRandomString } from "../../utils/otp.js";
-import {
-  deleteImagesFromB2,
-  deleteObjectFromB2,
-  uploadImageToB2,
-} from "../../utils/Upload/uploadImgToS3.js";
-import path from "path";
+  HiOutlineCalendar,
+  HiOutlineCollection,
+  HiOutlineDatabase,
+  HiOutlinePhotograph,
+} from "react-icons/hi";
+import { IoCloseOutline } from "react-icons/io5";
+import { LuUserCheck } from "react-icons/lu";
+import { MdOutlineError, MdOutlineWarning, MdRefresh } from "react-icons/md";
+import { RiLogoutCircleRLine } from "react-icons/ri";
+import { VscAccount } from "react-icons/vsc";
 
-const BUCKET_NAME = config.b2.bucket;
-const isReplicaSet =
-  mongoose.connection.readyState === 1 &&
-  mongoose.connection.client.s.options.replicaSet;
+// Storage Info Component
+const StorageInfo = ({ eventStatistics, onClose, maxStorage }) => {
+  const [isMinimized, setIsMinimized] = useState(false);
+  const { refreshPackage, isRefreshingPackage } = useRootData();
+  const usedPercentage = (eventStatistics?.totalMBUsed / maxStorage) * 100;
 
-/*** Get All Events for Client ***/
-const getAllEvents = async (req, res, next) => {
-  try {
-    const { id: clientId } = req["tokenPayload"];
-    const { search = "" } = req.query;
-
-    // Build the base query
-    const query = { enterpriseClientId: clientId };
-
-    const searchFields = ["slug", "eventName"];
-    const searchWords = search.trim().split(/\s+/);
-    if (searchWords && searchFields.length > 0) {
-      query.$or = searchFields.map((field) => ({
-        [field]: { $in: searchWords.map((word) => new RegExp(word, "i")) },
-      }));
-    }
-
-    const events = await Event.find(query)
-      .select(
-        "_id eventName slug totalMBUsed totalAlbums totalPhotos eventStartDate eventEndDate status createdAt archivedAt accessPin",
-      )
-      .sort({ createdAt: -1 })
-      .lean();
-
-    return jsonOne(res, HTTP.SUCCESS, events);
-  } catch (error) {
-    next(error);
-  }
-};
-
-/*** Unified Create/Update Event for client ***/
-const upsertEnterpriseEvent = async (req, res, next) => {
-  try {
-    const { id: enterpriseClientId } = req["tokenPayload"];
-    const { eventId } = req.params; // For update operation
-    const { eventName, description, location, eventStartDate, eventEndDate } =
-      req.body;
-
-    // 1. Get current active package
-    const clientPackage = await ClientPackage.findOne({
-      enterpriseClientId,
-      isActive: true,
-    }).populate("packageId");
-
-    if (!clientPackage || !clientPackage.packageId) {
-      return throwHttpError(
-        "eventId",
-        constants.event.activePackage,
-        HTTP.BAD_REQUEST,
-      );
-    }
-
-    // 2. For CREATE operation: Check event limit
-    if (!eventId) {
-      const { eventLimit } = clientPackage.packageId;
-      const currentEventCount = clientPackage.eventsDetails.length;
-
-      if (currentEventCount >= eventLimit) {
-        return throwHttpError("eventId", constants.event.limit, HTTP.FORBIDDEN);
-      }
-    }
-
-    // 3. Prepare event data
-    const eventData = {
-      eventName,
-      description,
-      location,
-      eventStartDate,
-      eventEndDate,
+  const getStorageStatus = () => {
+    if (usedPercentage >= 100)
+      return {
+        level: "full",
+        color: "text-red-600",
+        bgColor: "bg-red-50",
+        icon: MdOutlineError,
+      };
+    if (usedPercentage >= 90)
+      return {
+        level: "critical",
+        color: "text-red-500",
+        bgColor: "bg-red-50",
+        icon: MdOutlineWarning,
+      };
+    if (usedPercentage >= 80)
+      return {
+        level: "warning",
+        color: "text-yellow-600",
+        bgColor: "bg-yellow-50",
+        icon: MdOutlineWarning,
+      };
+    return {
+      level: "good",
+      color: "text-green-600",
+      bgColor: "bg-green-50",
+      icon: HiOutlineDatabase,
     };
+  };
 
-    let resultEvent;
+  const status = getStorageStatus();
+  const StatusIcon = status.icon;
 
-    if (eventId) {
-      // UPDATE operation
-      resultEvent = await Event.findOneAndUpdate(
-        { _id: eventId, enterpriseClientId },
-        eventData,
-        { new: true, runValidators: true },
-      );
+  const getWarningMessage = () => {
+    if (usedPercentage >= 100)
+      return "Storage is full! Please delete some files.";
+    if (usedPercentage >= 90)
+      return "Storage is almost full! Consider cleaning up.";
+    if (usedPercentage >= 80)
+      return "Storage usage is high. Monitor carefully.";
+    return null;
+  };
 
-      if (!resultEvent) {
-        return throwHttpError(
-          "eventId",
-          constants.event.notFound,
-          HTTP.NOT_FOUND,
-        );
+  const warningMessage = getWarningMessage();
+
+  if (isMinimized) {
+    return (
+      <div className="fixed bottom-4 right-4 z-40">
+        <button
+          onClick={() => setIsMinimized(false)}
+          className="flex items-center gap-2 px-3 py-2 bg-white rounded-lg shadow-lg border border-gray-200 hover:shadow-xl transition-all duration-300"
+          style={{ borderColor: "var(--color-secondary)" }}
+        >
+          <StatusIcon className={`text-lg ${status.color}`} />
+          <span
+            className="text-sm font-medium"
+            style={{ color: "var(--color-primary)" }}
+          >
+            {Math.round(usedPercentage)}%
+          </span>
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed bottom-4 right-4 z-40 w-full max-w-max sm:max-w-md">
+      <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+        {/* Header */}
+        <div
+          className="flex items-center justify-between p-4 border-b border-gray-100"
+          style={{ backgroundColor: "#f8f9fa" }}
+        >
+          <div className="flex items-center gap-2">
+            <HiOutlineDatabase className="text-xl text-primary" />
+            <h3 className="font-semibold text-sm text-primary">Storage Info</h3>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={refreshPackage}
+              disabled={isRefreshingPackage}
+              className="p-1 hover:bg-gray-200 rounded-full transition-colors duration-200 disabled:opacity-50"
+              title="Refresh Storage Data"
+            >
+              <MdRefresh
+                className={`text-lg text-primary ${
+                  isRefreshingPackage ? "animate-spin" : ""
+                }`}
+              />
+            </button>
+            <button
+              onClick={() => setIsMinimized(true)}
+              className="p-1 hover:bg-gray-200 rounded-full transition-colors duration-200"
+              title="Minimize"
+            >
+              <span className="text-sm font-bold text-primary">−</span>
+            </button>
+            <button
+              onClick={onClose}
+              className="p-1 hover:bg-gray-200 rounded-full transition-colors duration-200"
+              title="Close"
+            >
+              <IoCloseOutline className="text-lg text-primary" />
+            </button>
+          </div>
+        </div>
+
+        {/* Warning Message */}
+        {warningMessage && (
+          <div className={`p-3 border-b border-gray-100 ${status.bgColor}`}>
+            <div className="flex items-center gap-2">
+              <StatusIcon className={`text-lg ${status.color}`} />
+              <p className={`text-xs font-medium ${status.color}`}>
+                {warningMessage}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Storage Usage Bar */}
+        <div className="p-4 border-b border-gray-100">
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-xs font-medium text-primary">
+              Storage Used
+            </span>
+            <span className="text-xs font-bold text-primary">
+              {eventStatistics?.totalMBUsed}MB / {maxStorage}MB
+            </span>
+          </div>
+          <div className="w-full bg-gray-200 rounded-full h-2">
+            <div
+              className="h-2 rounded-full transition-all duration-300"
+              style={{
+                width: `${Math.min(usedPercentage, 100)}%`,
+                backgroundColor:
+                  usedPercentage >= 90
+                    ? "#ef4444"
+                    : usedPercentage >= 80
+                      ? "#f59e0b"
+                      : "var(--color-secondary)",
+              }}
+            />
+          </div>
+          <div className="text-xs text-gray-500 mt-1">
+            {Math.round(usedPercentage)}% used
+          </div>
+        </div>
+
+        {/* Statistics Grid */}
+        <div className="p-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div
+              className="flex items-center gap-2 p-2 rounded-lg"
+              style={{ backgroundColor: "#f8f9fa" }}
+            >
+              <HiOutlineCalendar className="text-lg text-secondary" />
+              <div>
+                <p className="text-xs text-gray-500">Events</p>
+                <p className="text-sm font-semibold text-primary">
+                  {eventStatistics?.totalEvents}
+                </p>
+              </div>
+            </div>
+
+            <div
+              className="flex items-center gap-2 p-2 rounded-lg"
+              style={{ backgroundColor: "#f8f9fa" }}
+            >
+              <HiOutlinePhotograph className="text-lg text-secondary" />
+              <div>
+                <p className="text-xs text-gray-500">Photos</p>
+                <p className="text-sm font-semibold text-primary">
+                  {eventStatistics?.totalPhotos}
+                </p>
+              </div>
+            </div>
+
+            <div
+              className="flex items-center gap-2 p-2 rounded-lg"
+              style={{ backgroundColor: "#f8f9fa" }}
+            >
+              <HiOutlineCollection className="text-lg text-secondary" />
+              <div>
+                <p className="text-xs text-gray-500">Albums</p>
+                <p className="text-sm font-semibold text-primary">
+                  {eventStatistics?.totalAlbums}
+                </p>
+              </div>
+            </div>
+
+            <div
+              className="flex items-center gap-2 p-2 rounded-lg"
+              style={{ backgroundColor: "#f8f9fa" }}
+            >
+              <HiOutlineDatabase className="text-lg text-secondary" />
+              <div>
+                <p className="text-xs text-gray-500">Storage</p>
+                <p className="text-sm font-semibold text-primary">
+                  {eventStatistics?.totalMBUsed}MB
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const Navbar = () => {
+  const router = useRouter();
+  const [isPopupOpen, setIsPopupOpen] = useState(false);
+  const [showStorageInfo, setShowStorageInfo] = useState(false);
+  const modalRef = useRef(null);
+  const { user, onePackage, refreshPackage, isRefreshingPackage } =
+    useRootData();
+  const eventStatistics = onePackage?.eventStatistics;
+  const handleLogout = async () => {
+    try {
+      const { logOutUser } =
+        await import("@/src/redux/features/auth/authThunks");
+      await logOutUser(router, {});
+    } catch (error) {
+      console.error("Error saving data:", error);
+    }
+  };
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (modalRef.current && !modalRef.current.contains(event.target)) {
+        setIsPopupOpen(false);
       }
-
-      return jsonOne(res, HTTP.SUCCESS, eventData, constants.event.updated);
-    } else {
-      // CREATE operation
-      const slug = await `${generateSlug(eventName)}-${generateRandomString(
-        6,
-      )}`;
-      const accessPin = generateOtp(6);
-      resultEvent = await Event.create({
-        ...eventData,
-        enterpriseClientId,
-        clientPackageId: clientPackage._id,
-        slug,
-        accessPin,
-      });
-
-      clientPackage.eventsDetails.push(resultEvent._id);
-      await clientPackage.save();
-
-      return jsonOne(res, HTTP.CREATED, resultEvent, constants.event.added);
-    }
-  } catch (error) {
-    next(error);
-  }
-};
-
-/*** update Event Settings  ***/
-const updateEventSettings = async (req, res, next) => {
-  try {
-    const { status, faceRecognition, downloadPermissions, eventId } = req.body;
-    const updateData = {
-      ...(status && { status }),
-      ...(status === EventStatus.ARCHIVED && { archivedAt: new Date() }),
-      ...(status === EventStatus.ACTIVE && { archivedAt: null }),
-      ...(faceRecognition !== undefined && { faceRecognition }),
-      ...(downloadPermissions && { downloadPermissions }),
     };
-    const event = await Event.findByIdAndUpdate(eventId, updateData);
-
-    if (!event) {
-      return throwHttpError(
-        "eventId",
-        constants.event.notFound,
-        HTTP.NOT_FOUND,
-      );
-    }
-    return jsonOne(
-      res,
-      HTTP.SUCCESS,
-      { ...updateData, eventId },
-      "Event settings updated successfully",
-    );
-  } catch (error) {
-    next(error);
-  }
-};
-
-/*** update Event theme&Photo Settings  ***/
-const updateEventThemeSettings = async (req, res, next) => {
-  try {
-    const { id: clientId } = req.tokenPayload;
-    const {
-      themeSettings: themeSettingsString,
-      existingCoverPhoto,
-      eventId,
-      eventName,
-    } = req.body;
-    const themeSettings = JSON.parse(themeSettingsString);
-
-    // Get file extension if file exists
-    let coverPhotoUrl;
-    if (req?.file) {
-      const extension =
-        path.extname(req.file.originalname).toLowerCase() || ".jpg";
-      coverPhotoUrl = `${clientId}/${eventId}/${generateSlug(eventName)}-cover${extension}`;
-    }
-
-    // Find and update in a single operation using findOneAndUpdate
-    const updatedEvent = await Event.findOneAndUpdate(
-      { _id: eventId },
-      {
-        $set: {
-          themeSettings,
-          ...(req?.file && {
-            "coverPhoto.url": coverPhotoUrl,
-            "coverPhoto.size": req.file.size,
-            "coverPhoto.uploadedAt": new Date(),
-          }),
-        },
-      },
-      { new: true, runValidators: true },
-    );
-
-    if (!updatedEvent) {
-      return throwHttpError(
-        "eventId",
-        constants.event.notFound,
-        HTTP.NOT_FOUND,
-      );
-    }
-    // Handle file upload if present
-    if (req?.file) {
-      if (existingCoverPhoto) {
-        await deleteObjectFromB2(existingCoverPhoto);
-      }
-      await uploadImageToB2(coverPhotoUrl, req.file.buffer, req.file.mimetype);
-    }
-
-    return jsonOne(
-      res,
-      HTTP.SUCCESS,
-      {
-        themeSettings: updatedEvent.themeSettings,
-        coverPhoto: updatedEvent.coverPhoto,
-      },
-      "Event settings updated successfully",
-    );
-  } catch (error) {
-    next(error);
-  }
-};
-
-/*** Get One Event ***/
-const getOneEvent = async (req, res, next) => {
-  try {
-    const { eventId } = req.params;
-    /*** Get One Event ***/
-    const baseOptions = {
-      Model: Event,
-      filter: { _id: eventId },
-      select: "-albums -clientPackageId -enterpriseClientId",
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
     };
+  }, [isPopupOpen]);
+  // Calculate storage usage percentage using real package limit
+  const maxStorage = onePackage?.packageId?.totalPhotoMB;
+  const usedPercentage =
+    maxStorage > 0 ? (eventStatistics?.totalMBUsed / maxStorage) * 100 : 0;
+  const getStorageIndicatorColor = () => {
+    if (usedPercentage >= 90) return "text-red-500";
+    if (usedPercentage >= 80) return "text-yellow-500";
+    return "text-green-500";
+  };
 
-    const getItem = await getSingleData(baseOptions);
-    return jsonOne(res, HTTP.SUCCESS, getItem);
-  } catch (error) {
-    next(error);
-  }
+  return (
+    <>
+      <nav className="flex justify-between items-start sm:items-center mb-2.5 w-auto mt-1">
+        <div className="mb-3 sm:mb-0">
+          <div className="flex items-center gap-2">
+            <h1 className="text-primary md:text-lg lg:text-2xl font-bold">
+              Hello {user?.fullName}! 👋
+            </h1>
+            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+          </div>
+          <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4">
+            <p className="text-xs md:text-sm text-gray-500">
+              Welcome to your FindMyPhotos dashboard...
+            </p>
+            <div className="flex items-center gap-2 text-xs md:text-sm">
+              <span className="text-gray-500">Storage:</span>
+              <span className="font-medium text-primary">
+                {eventStatistics?.totalMBUsed}MB /{" "}
+                {onePackage?.packageId?.totalPhotoMB}MB
+              </span>
+              <span className="text-gray-400">
+                ({onePackage?.packageId?.packageName}
+                {onePackage?.packageId?.isTrial ? " - Trial" : ""})
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex sm:flex-row flex-col items-center gap-2 relative">
+          {/* Storage Info Button */}
+          <button
+            onClick={() => setShowStorageInfo(true)}
+            className="flex items-center gap-2 sm:p-2 sm:hover:bg-gray-50 rounded-full transition-all duration-300 hover:shadow-sm group sm:order-none order-2"
+            title="Storage Info"
+          >
+            <div className="relative">
+              <HiOutlineDatabase
+                className={`text-2xl ${getStorageIndicatorColor()} transition-colors duration-300`}
+              />
+              {usedPercentage >= 80 && (
+                <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full border border-white animate-pulse"></div>
+              )}
+            </div>
+            <span className="text-xs font-medium text-gray-700 group-hover:text-primary transition-colors duration-300">
+              {Math.round(usedPercentage)}%
+            </span>
+          </button>
+          <button
+            onClick={refreshPackage}
+            disabled={isRefreshingPackage}
+            className="p-1 hover:bg-gray-200 rounded-full transition-colors duration-200 disabled:opacity-50"
+            title="Refresh Storage Data"
+          >
+            <MdRefresh
+              className={`text-lg text-primary ${
+                isRefreshingPackage ? "animate-spin" : ""
+              }`}
+            />
+          </button>
+
+          {/* User Profile Button */}
+          <button
+            onClick={() => setIsPopupOpen(!isPopupOpen)}
+            className="flex items-center gap-2 sm:p-2 sm:hover:bg-gray-50 rounded-full transition-all duration-300 hover:shadow-sm group"
+          >
+            {user?.image ? (
+              <Image
+                src={user.image}
+                alt="Profile"
+                width={64}
+                height={64}
+                className="w-8 h-8 rounded-xl object-cover shadow-md"
+              />
+            ) : (
+              <div className="w-8 h-8 bg-gradient-to-br from-secondary to-primary rounded-xl flex items-center justify-center text-white text-xl font-bold shadow-md">
+                {user?.fullName?.[0]?.toUpperCase() || "F"}
+              </div>
+            )}
+            <span className="hidden xl:inline text-sm font-medium text-gray-700 group-hover:text-primary transition-colors duration-300">
+              {user?.fullName}
+            </span>
+          </button>
+
+          {/* User Popup Menu */}
+          {isPopupOpen && (
+            <div
+              ref={modalRef}
+              className="absolute z-50 top-full right-0 mt-2 w-64 bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden animate-fadeIn"
+            >
+              <div className="absolute -top-2 right-4 w-4 h-4 bg-white transform rotate-45 border-t border-l border-gray-100"></div>
+              <div className="p-4 border-b border-gray-100">
+                <div className="flex items-center gap-3">
+                  {user?.image ? (
+                    <Image
+                      src={user.image}
+                      alt="Profile"
+                      width={64}
+                      height={64}
+                      className="w-8 h-8 rounded-xl object-cover shadow-md"
+                    />
+                  ) : (
+                    <div className="w-8 h-8 bg-gradient-to-br from-secondary to-primary rounded-xl flex items-center justify-center text-white text-xl font-bold shadow-md">
+                      {user?.fullName?.[0]?.toUpperCase() || "F"}
+                    </div>
+                  )}
+                  <div>
+                    <p className="font-medium text-gray-900">
+                      {user?.fullName}
+                    </p>
+                    <p className="text-xs text-gray-500">Online</p>
+                  </div>
+                </div>
+              </div>
+              <ul className="py-1">
+                <li>
+                  <Link
+                    href="/my-account"
+                    className="flex items-center px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 transition-colors duration-150 group"
+                  >
+                    <LuUserCheck className="text-xl text-secondary mr-3 group-hover:scale-110 transition-transform duration-200" />
+                    <span>My Account</span>
+                  </Link>
+                </li>
+                <li className="border-t border-gray-100">
+                  <button
+                    className="flex items-center w-full px-4 py-3 text-sm text-red-600 hover:bg-red-50 transition-colors duration-150 group"
+                    onClick={handleLogout}
+                    type="button"
+                  >
+                    <RiLogoutCircleRLine className="text-xl text-red-600 mr-3 group-hover:scale-110 transition-transform duration-200" />
+                    <span>Logout</span>
+                  </button>
+                </li>
+              </ul>
+            </div>
+          )}
+        </div>
+      </nav>
+
+      {/* Storage Info Modal */}
+      {showStorageInfo && (
+        <StorageInfo
+          eventStatistics={eventStatistics}
+          onClose={() => setShowStorageInfo(false)}
+          maxStorage={maxStorage}
+        />
+      )}
+    </>
+  );
 };
 
-/*** delete event ***/
-const deleteEvent = async (req, res, next) => {
-  const session = isReplicaSet ? await mongoose.startSession() : null;
-  let transactionActive = false;
-
-  try {
-    const { eventId } = req.params;
-    const { id: userId } = req["tokenPayload"];
-
-    if (session) {
-      session.startTransaction();
-      transactionActive = true;
-    }
-
-    // 🔥 OPTIMIZED: Get album IDs AND image paths in ONE query
-    const [result] = await Album.aggregate([
-      { $match: { eventId: new mongoose.Types.ObjectId(eventId) } },
-      {
-        $group: {
-          _id: "$eventId",
-          albumIds: { $push: "$_id" },
-          allImages: { $push: "$images" },
-        },
-      },
-      {
-        $project: {
-          albumIds: 1,
-          imagePaths: {
-            $reduce: {
-              input: "$allImages",
-              initialValue: [],
-              in: {
-                $concatArrays: [
-                  "$$value",
-                  {
-                    $map: {
-                      input: "$$this",
-                      as: "img",
-                      in: {
-                        file: "$$img.file.path",
-                        thumb: "$$img.thumbnail.path",
-                      },
-                    },
-                  },
-                ],
-              },
-            },
-          },
-        },
-      },
-    ]).session(session || undefined);
-
-    if (!result) {
-      // No albums found, just delete the event
-      await Promise.all([
-        Event.findByIdAndDelete(eventId, { session: session || undefined }),
-        ClientPackage.findOneAndUpdate(
-          { enterpriseClientId: userId },
-          { $pull: { eventsDetails: eventId } },
-          { session: session || undefined },
-        ),
-      ]);
-
-      if (transactionActive) await session.commitTransaction();
-      return jsonOne(res, HTTP.SUCCESS, {}, constants.event.deleted);
-    }
-
-    // 🔥 DELETE EACH ALBUM FOLDER FROM PYTHON API
-    const albumIds = result.albumIds || [];
-    if (albumIds.length > 0) {
-      albumIds.forEach((albumId) => {
-        const folder = `${userId}/${eventId}/${albumId.toString()}`;
-        pythonAPI.deleteFolder(folder);
-      });
-    }
-
-    // 🔥 BUILD B2 DELETE PATHS
-    const allPaths = [];
-    if (result.imagePaths) {
-      result.imagePaths.forEach((img) => {
-        if (img.file) allPaths.push({ Key: img.file });
-        if (img.thumb) allPaths.push({ Key: img.thumb });
-      });
-    }
-    // 🔥 DELETE FROM B2
-    if (allPaths.length > 0) {
-      await deleteImagesFromB2(allPaths);
-    }
-
-    // 🔥 DELETE FROM DB
-    await Promise.all([
-      Album.deleteMany({ eventId }).session(session || undefined),
-      ClientPackage.findOneAndUpdate(
-        { enterpriseClientId: userId },
-        { $pull: { eventsDetails: eventId } },
-        { session: session || undefined },
-      ),
-    ]);
-
-    await Event.findByIdAndDelete(eventId, { session: session || undefined });
-
-    if (transactionActive) {
-      await session.commitTransaction();
-    }
-
-    return jsonOne(res, HTTP.SUCCESS, {}, constants.event.deleted);
-  } catch (error) {
-    if (transactionActive) {
-      await session.abortTransaction();
-    }
-    next(error);
-  } finally {
-    if (session) session.endSession();
-  }
-};
-
-/*** upsert Album (Create/Update) ***/
-const upsertAlbum = async (req, res, next) => {
-  try {
-    const { albumName, eventId, albumId } = req.body;
-    const { id: clientId } = req["tokenPayload"];
-    const event = await Event.findById(eventId).lean();
-    if (!event) {
-      return throwHttpError(
-        "eventId",
-        constants.event.notFound,
-        HTTP.NOT_FOUND,
-      );
-    }
-
-    const album = albumId
-      ? await Album.findByIdAndUpdate(albumId, { albumName }, { new: true })
-      : await Album.create({ albumName, eventId, createdBy: clientId });
-
-    if (!album) {
-      return throwHttpError(
-        "albumId",
-        constants.album.notFound,
-        HTTP.NOT_FOUND,
-      );
-    }
-
-    if (!albumId) {
-      await Event.findByIdAndUpdate(eventId, {
-        $addToSet: { albums: album._id },
-        $inc: { totalAlbums: 1 },
-      });
-    }
-
-    return jsonOne(
-      res,
-      albumId ? HTTP.SUCCESS : HTTP.CREATED,
-      album,
-      albumId ? constants.album.updated : constants.album.added,
-    );
-  } catch (error) {
-    next(error);
-  }
-};
-
-/*** Get All Albums for an Event ***/
-const getAllAlbums = async (req, res, next) => {
-  try {
-    const { eventId } = req.query;
-    const albums = await Album.find({ eventId })
-      .select("_id albumName")
-      .sort({ createdAt: -1 })
-      .lean();
-    return jsonOne(res, HTTP.SUCCESS, albums);
-  } catch (error) {
-    next(error);
-  }
-};
-
-/*** Get One Album with Paginated Images ***/
-const getOneAlbum = async (req, res, next) => {
-  try {
-    const { albumId } = req.params;
-    const { page = 1, limit = 100 } = req.query;
-    // Convert to numbers
-    const pageNum = parseInt(page);
-    const limitNum = parseInt(limit);
-
-    /*** Get Album with Paginated Images ***/
-    const album = await Album.aggregate([
-      { $match: { _id: new mongoose.Types.ObjectId(albumId) } },
-      {
-        $project: {
-          albumName: 1,
-          eventId: 1,
-          totalMBUsed: 1,
-          totalImages: 1,
-          status: 1,
-          createdBy: 1,
-          createdAt: 1,
-          updatedAt: 1,
-          images: {
-            $slice: ["$images", (pageNum - 1) * limitNum, limitNum],
-          },
-          totalPages: { $ceil: { $divide: [{ $size: "$images" }, limitNum] } },
-          currentPage: pageNum,
-          itemsPerPage: limitNum,
-        },
-      },
-    ]);
-
-    if (!album || album.length === 0) {
-      return jsonOne(res, HTTP.NOT_FOUND, { message: "Album not found" });
-    }
-
-    return jsonOne(res, HTTP.SUCCESS, album[0]);
-  } catch (error) {
-    next(error);
-  }
-};
-
-/*** Check all files validate ***/
-const validateFiles = async (req, res, next) => {
-  try {
-    const { albumId, files } = req.body;
-    const { id: enterpriseClientId } = req.tokenPayload;
-
-    // 1. PARALLEL DATA FETCHING (OPTIMIZED)
-    const [album, events, clientPackage] = await Promise.all([
-      Album.findById(albumId).select("images totalImages").lean(),
-      Event.find({ enterpriseClientId }).select("totalMBUsed").lean(),
-      ClientPackage.findOne({ enterpriseClientId })
-        .populate("packageId")
-        .select("packageId endDate")
-        .lean(),
-    ]);
-
-    const now = new Date();
-    if (new Date(clientPackage.endDate) < now) {
-      return throwHttpError(
-        "Resources not found",
-        constants.package.expired,
-        HTTP.FORBIDDEN,
-      );
-    }
-
-    if (!album || !events || !clientPackage?.packageId) {
-      return throwHttpError(
-        "Resources not found",
-        constants.album.notFound,
-        HTTP.NOT_FOUND,
-      );
-    }
-
-    // 2. PRE-COMPUTE ALL LIMITS
-    const { maximumPhotoSize, imageLimitPerAlbum, totalPhotoMB } =
-      clientPackage.packageId;
-    const remainingAlbumSlots = Math.max(
-      0,
-      imageLimitPerAlbum - album.totalImages,
-    );
-    const totalUsedAcrossEvents = events.reduce(
-      (sum, ev) => sum + (ev.totalMBUsed || 0),
-      0,
-    );
-    const remainingStorageMB = Math.max(
-      0,
-      totalPhotoMB - totalUsedAcrossEvents,
-    );
-
-    // 3. OPTIMIZED DUPLICATE CHECKING
-    const albumHashes = new Set(album.images.map((img) => img.hash));
-
-    // 4. PRE-ALLOCATE ARRAYS (FOR LARGE FILE SETS)
-    const result = {
-      rejectionCounts: {
-        sizeExceeded: 0,
-        albumLimitExceeded: 0,
-        storageExceeded: 0,
-      },
-      duplicateFiles: [],
-      acceptedFiles: [],
-      totalSize: 0,
-    };
-
-    let dupIndex = 0,
-      accIndex = 0;
-    let currentSize = 0;
-
-    // Single pass validation loop
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const { size, hash, originalSize } = file;
-
-      if (albumHashes.has(hash)) {
-        result.duplicateFiles[dupIndex++] = file;
-      } else if (originalSize > maximumPhotoSize) {
-        result.rejectionCounts.sizeExceeded++;
-      } else if (accIndex >= remainingAlbumSlots) {
-        result.rejectionCounts.albumLimitExceeded++;
-      } else if (currentSize + size > remainingStorageMB) {
-        result.rejectionCounts.storageExceeded++;
-      } else {
-        result.acceptedFiles[accIndex++] = file;
-        currentSize += size;
-      }
-    }
-
-    result.totalSize = currentSize;
-    result.duplicateFiles.length = dupIndex;
-    result.acceptedFiles.length = accIndex;
-
-    return jsonOne(res, HTTP.SUCCESS, result);
-  } catch (error) {
-    next(error);
-  }
-};
-
-/*** generate file Presigned Url Automatically chooses direct or multipart based on file size ***/
-const generateSmartUploadUrl = async (req, res, next) => {
-  try {
-    const { fileType, folderPath, fileSize } = req.body;
-
-    const fileSizeMB = fileSize / (1024 * 1024);
-    const MAX_FILE_SIZE_MB = 60; // Your package limit
-
-    if (fileSizeMB > MAX_FILE_SIZE_MB) {
-      return throwHttpError(
-        "Resources not found",
-        `File size exceeds maximum allowed size of ${MAX_FILE_SIZE_MB}MB`,
-        HTTP.BAD_REQUEST,
-      );
-    }
-
-    // 🔥 STRATEGY 1: Direct Upload (0-10MB)
-    if (fileSizeMB <= 10) {
-      const command = new PutObjectCommand({
-        Bucket: BUCKET_NAME,
-        Key: folderPath,
-        ContentType: fileType,
-      });
-
-      const uploadUrl = await getSignedUrl(b2Client, command, {
-        expiresIn: 3600, // 1 hour
-      });
-
-      return jsonOne(res, HTTP.SUCCESS, {
-        success: true,
-        uploadMethod: "direct",
-        uploadUrl,
-        publicUrl: folderPath,
-        expiresIn: 3600,
-        fileSize: fileSizeMB.toFixed(2) + " MB",
-      });
-    }
-
-    // 🔥 STRATEGY 2 & 3: Multipart Upload (10MB+)
-    const chunkSize =
-      fileSizeMB <= 30
-        ? 5 * 1024 * 1024 // 5MB chunks for 10-30MB files
-        : 10 * 1024 * 1024; // 10MB chunks for 30-60MB files
-
-    const totalParts = Math.ceil(fileSize / chunkSize);
-
-    // Create multipart upload
-    const createCommand = new CreateMultipartUploadCommand({
-      Bucket: BUCKET_NAME,
-      Key: folderPath,
-      ContentType: fileType,
-    });
-
-    const { UploadId } = await b2Client.send(createCommand);
-
-    if (!UploadId) {
-      throw new Error("Failed to create multipart upload");
-    }
-
-    // Generate presigned URLs for each part
-    const partUrls = [];
-    for (let partNumber = 1; partNumber <= totalParts; partNumber++) {
-      const uploadPartCommand = new UploadPartCommand({
-        Bucket: BUCKET_NAME,
-        Key: folderPath,
-        PartNumber: partNumber,
-        UploadId: UploadId,
-      });
-
-      const partUrl = await getSignedUrl(b2Client, uploadPartCommand, {
-        expiresIn: 3600,
-      });
-
-      partUrls.push({
-        partNumber,
-        uploadUrl: partUrl,
-      });
-    }
-
-    return jsonOne(res, HTTP.SUCCESS, {
-      success: true,
-      uploadMethod: "multipart",
-      uploadId: UploadId,
-      partUrls,
-      chunkSize,
-      totalParts,
-      publicUrl: folderPath,
-      expiresIn: 3600,
-      fileSize: fileSizeMB.toFixed(2) + " MB",
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-/** Complete Multipart Upload */
-const completeMultipartUpload = async (req, res, next) => {
-  try {
-    const { folderPath, uploadId, parts } = req.body;
-
-    // Validation
-    if (!parts || !Array.isArray(parts)) {
-      return throwHttpError(
-        "Resources not found",
-        "Missing required fields: parts",
-        HTTP.BAD_REQUEST,
-      );
-    }
-
-    // Ensure parts are sorted and have required fields
-    const sortedParts = parts
-      .sort((a, b) => a.partNumber - b.partNumber)
-      .map((p) => ({
-        PartNumber: p.partNumber,
-        ETag: p.etag,
-      }));
-
-    const command = new CompleteMultipartUploadCommand({
-      Bucket: BUCKET_NAME,
-      Key: folderPath,
-      UploadId: uploadId,
-      MultipartUpload: {
-        Parts: sortedParts,
-      },
-    });
-
-    const result = await b2Client.send(command);
-
-    return jsonOne(res, HTTP.SUCCESS, {
-      success: true,
-      publicUrl: folderPath,
-      etag: result.ETag,
-      location: result.Location,
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-/** Abort Multipart Upload (cleanup on failure)  */
-const abortMultipartUpload = async (req, res, next) => {
-  try {
-    const { folderPath, uploadId } = req.body;
-
-    const command = new AbortMultipartUploadCommand({
-      Bucket: BUCKET_NAME,
-      Key: folderPath,
-      UploadId: uploadId,
-    });
-
-    await b2Client.send(command);
-
-    return jsonOne(res, HTTP.SUCCESS, {});
-  } catch (error) {
-    next(error);
-  }
-};
-
-/*** Updated uploadFiles ***/
-const registerUploads = async (req, res, next) => {
-  try {
-    const { id: clientId } = req.tokenPayload;
-    const { albumId, eventId, files } = req.body;
-
-    // 1. Get active package for client
-    const clientPackage = await ClientPackage.findOne({
-      enterpriseClientId: clientId,
-      isActive: true,
-    })
-      .select("endDate")
-      .lean();
-
-    if (!clientPackage) {
-      return throwHttpError(
-        "Resources not found",
-        constants.package.notFound,
-        HTTP.FORBIDDEN,
-      );
-    }
-
-    if (!clientPackage || new Date(clientPackage.endDate) < new Date()) {
-      return throwHttpError(
-        "Resources not found",
-        constants.package.expired,
-        HTTP.FORBIDDEN,
-      );
-    }
-
-    const totalMB = parseFloat(
-      files
-        .reduce((sum, file) => sum + Number(file.file.sizeInMB || 0), 0)
-        .toFixed(2),
-    );
-
-    // 🔥 Call Python API to upload images
-    pythonAPI.uploadImages(files);
-
-    // Atomic updates
-    const [savedAlbum] = await Promise.all([
-      Album.findByIdAndUpdate(
-        albumId,
-        {
-          $push: { images: { $each: files } },
-          $inc: { totalMBUsed: totalMB, totalImages: files.length },
-        },
-        { new: true, projection: { images: { $slice: -files.length } } },
-      ),
-      Event.findByIdAndUpdate(eventId, {
-        $inc: { totalMBUsed: totalMB, totalPhotos: files.length },
-      }),
-    ]);
-
-    return jsonOne(res, HTTP.SUCCESS, {
-      photos: files.length,
-      mb: totalMB,
-      files: savedAlbum.images,
-    });
-  } catch (err) {
-    next(err);
-  }
-};
-
-/*** file Replacements - delete file ***/
-const fileReplacements = async (req, res, next) => {
-  const session = isReplicaSet ? await mongoose.startSession() : null;
-  let transactionActive = false;
-
-  try {
-    if (session) {
-      session.startTransaction();
-      transactionActive = true;
-    }
-
-    const { albumId, eventId, replaceHashes = [] } = req.body;
-
-    // ✅ ULTRA-FAST: Use aggregation
-    const [result] = await Album.aggregate([
-      { $match: { _id: new mongoose.Types.ObjectId(albumId) } },
-      { $unwind: "$images" },
-      { $match: { "images.hash": { $in: replaceHashes } } },
-      {
-        $group: {
-          _id: null,
-          filePaths: { $push: "$images.file.path" },
-          thumbPaths: { $push: "$images.thumbnail.path" },
-          totalSize: { $sum: "$images.file.sizeInMB" },
-          count: { $sum: 1 },
-        },
-      },
-    ]).session(session || undefined);
-
-    if (!result || result.count === 0) {
-      return throwHttpError(
-        "No matching files found",
-        constants.image.replace,
-        HTTP.BAD_REQUEST,
-      );
-    }
-
-    // Build delete arrays
-    const filesToDelete = result.filePaths
-      .filter(Boolean)
-      .map((path) => ({ Key: path }));
-
-    const thumbnailsToDelete = result.thumbPaths
-      .filter(Boolean)
-      .map((path) => ({ Key: path }));
-
-    // Delete from B2
-    const deletePromises = [];
-    if (filesToDelete.length > 0) {
-      deletePromises.push(deleteImagesFromB2(filesToDelete));
-    }
-    if (thumbnailsToDelete.length > 0) {
-      deletePromises.push(deleteImagesFromB2(thumbnailsToDelete));
-    }
-    await Promise.all(deletePromises);
-
-    // Update DB
-    await Promise.all([
-      Album.findByIdAndUpdate(
-        albumId,
-        {
-          $pull: { images: { hash: { $in: replaceHashes } } },
-          $inc: {
-            totalMBUsed: -result.totalSize,
-            totalImages: -result.count,
-          },
-        },
-        { session: session || undefined },
-      ).lean(),
-      Event.findByIdAndUpdate(
-        eventId,
-        {
-          $inc: {
-            totalMBUsed: -result.totalSize,
-            totalPhotos: -result.count,
-          },
-        },
-        { session: session || undefined },
-      ),
-    ]);
-
-    if (transactionActive) {
-      await session.commitTransaction();
-    }
-
-    return jsonOne(res, HTTP.SUCCESS, {
-      totalMB: result.totalSize,
-      filesDeleted: result.count,
-      replaceHashes,
-    });
-  } catch (error) {
-    if (transactionActive) {
-      await session.abortTransaction();
-    }
-    next(error);
-  } finally {
-    if (session) session.endSession();
-  }
-};
-
-/*** delete failed files from direct B2 ***/
-const failedDeleteImagesFromB2 = async (req, res, next) => {
-  try {
-    if (!req.body || !Array.isArray(req.body) || req.body.length === 0) {
-      return throwHttpError(
-        "Resources not found",
-        "Missing or invalid files array",
-        HTTP.BAD_REQUEST,
-      );
-    }
-    await deleteImagesFromB2(req.body);
-    return jsonOne(res, HTTP.SUCCESS, {});
-  } catch (error) {
-    next(error);
-  }
-};
-
-/*** delete album files from DB & B2 ***/
-const deleteAlbumImages = async (req, res, next) => {
-  const session = isReplicaSet ? await mongoose.startSession() : null;
-  let transactionActive = false;
-
-  try {
-    if (session) {
-      session.startTransaction();
-      transactionActive = true;
-    }
-
-    const { imageIds, albumId } = req.body;
-    const { id: userId } = req["tokenPayload"];
-
-    if (!imageIds?.length) {
-      return throwHttpError(
-        "Invalid image IDs",
-        constants.image.invalid,
-        HTTP.BAD_REQUEST,
-      );
-    }
-
-    // ✅ AGGREGATION: Get paths and size in one query
-    const [result] = await Album.aggregate([
-      { $match: { _id: new mongoose.Types.ObjectId(albumId) } },
-      { $unwind: "$images" },
-      {
-        $match: {
-          "images._id": {
-            $in: imageIds.map((id) => new mongoose.Types.ObjectId(id)),
-          },
-        },
-      },
-      {
-        $group: {
-          _id: "$eventId",
-          albumId: { $first: "$_id" },
-          filePaths: { $push: "$images.file.path" },
-          thumbPaths: { $push: "$images.thumbnail.path" },
-          totalSize: {
-            $sum: {
-              $convert: {
-                input: "$images.file.sizeInMB",
-                to: "double",
-                onError: 0,
-                onNull: 0,
-              },
-            },
-          },
-          count: { $sum: 1 },
-          images: { $push: "$images" },
-        },
-      },
-    ]).session(session || undefined);
-
-    if (!result || result.count === 0) {
-      return throwHttpError(
-        "No matching images found",
-        constants.image.matching,
-        HTTP.NOT_FOUND,
-      );
-    }
-
-    // 🔥 Delete from Python API
-    const eventId = result._id.toString();
-    const albumIdStr = result.albumId.toString();
-    pythonAPI.deleteAlbumImages(result.images, userId, eventId, albumIdStr);
-
-    // Build delete arrays
-    const filesToDelete = result.filePaths
-      .filter(Boolean)
-      .map((p) => ({ Key: p }));
-    const thumbnailsToDelete = result.thumbPaths
-      .filter(Boolean)
-      .map((p) => ({ Key: p }));
-
-    // Delete from B2
-    const deletePromises = [];
-    if (filesToDelete.length > 0)
-      deletePromises.push(deleteImagesFromB2(filesToDelete));
-    if (thumbnailsToDelete.length > 0)
-      deletePromises.push(deleteImagesFromB2(thumbnailsToDelete));
-    await Promise.all(deletePromises);
-
-    // Update DB
-    const [currentAlbum] = await Promise.all([
-      Album.findByIdAndUpdate(
-        albumId,
-        {
-          $pull: { images: { _id: { $in: imageIds } } },
-          $inc: { totalMBUsed: -result.totalSize, totalImages: -result.count },
-        },
-        { new: true, session: session || undefined },
-      ),
-      Event.findByIdAndUpdate(
-        result._id,
-        {
-          $inc: { totalMBUsed: -result.totalSize, totalPhotos: -result.count },
-        },
-        { session: session || undefined },
-      ),
-    ]);
-
-    if (transactionActive) await session.commitTransaction();
-
-    return jsonOne(
-      res,
-      HTTP.SUCCESS,
-      { photos: result.count, totalMB: result.totalSize, currentAlbum },
-      constants.image.deleted,
-    );
-  } catch (error) {
-    if (transactionActive) await session.abortTransaction();
-    next(error);
-  } finally {
-    if (session) session.endSession();
-  }
-};
-
-/*** Optimized: Delete entire album and all its images from DB & B2 ***/
-const deleteAlbum = async (req, res, next) => {
-  const session = isReplicaSet ? await mongoose.startSession() : null;
-  let transactionActive = false;
-
-  try {
-    if (session) {
-      session.startTransaction();
-      transactionActive = true;
-    }
-
-    const { albumId } = req.params;
-    const { id: userId } = req["tokenPayload"];
-    // Find album with images and eventId only (efficient query)
-    const album = await Album.findById(albumId)
-      .select("images eventId")
-      .session(session || undefined);
-    if (!album) {
-      return throwHttpError(
-        "Album not found",
-        constants.album.notFound,
-        HTTP.NOT_FOUND,
-      );
-    }
-    const eventId = album.eventId.toString();
-    const folder = `${userId}/${eventId}/${albumId}`;
-    pythonAPI.deleteFolder(folder);
-
-    // If there are no images, just delete album and update event
-    if (!album.images?.length) {
-      await Promise.all([
-        Album.findByIdAndDelete(albumId).session(session || undefined),
-        Event.findByIdAndUpdate(
-          album.eventId,
-          {
-            $inc: { totalAlbums: -1 },
-            $pull: { albums: albumId },
-          },
-          { session: session || undefined },
-        ),
-      ]);
-
-      if (transactionActive) await session.commitTransaction();
-      return jsonOne(res, HTTP.SUCCESS, null, constants.album.deleted);
-    }
-
-    // ✅ OPTIMIZED: Single loop for paths and stats
-    const filesToDelete = [];
-    const thumbnailsToDelete = [];
-    let totalMB = 0;
-    let totalPhotos = 0;
-
-    for (const img of album.images) {
-      if (img.file?.path) filesToDelete.push({ Key: img.file.path });
-      if (img.thumbnail?.path)
-        thumbnailsToDelete.push({ Key: img.thumbnail.path });
-      totalMB += img.file?.sizeInMB || 0;
-      totalPhotos++;
-    }
-
-    // Parallel B2 deletion (only if files exist)
-    const deleteOps = [];
-    if (filesToDelete.length) deleteOps.push(deleteImagesFromB2(filesToDelete));
-    if (thumbnailsToDelete.length)
-      deleteOps.push(deleteImagesFromB2(thumbnailsToDelete));
-    if (deleteOps.length) await Promise.all(deleteOps);
-
-    // Delete album and update event in parallel
-    await Promise.all([
-      Album.findByIdAndDelete(albumId).session(session || undefined),
-      Event.findByIdAndUpdate(
-        album.eventId,
-        {
-          $inc: {
-            totalMBUsed: -totalMB,
-            totalPhotos: -totalPhotos,
-            totalAlbums: -1,
-          },
-          $pull: { albums: albumId },
-        },
-        { session: session || undefined },
-      ),
-    ]);
-
-    if (transactionActive) await session.commitTransaction();
-
-    return jsonOne(res, HTTP.SUCCESS, null, constants.album.deleted);
-  } catch (error) {
-    if (transactionActive) await session.abortTransaction();
-    next(error);
-  } finally {
-    if (session) session.endSession();
-  }
-};
-
-/*** Show all guest details ***/
-const getGuestData = async (req, res, next) => {
-  try {
-    const { eventId } = req.params;
-    const { page = 1, limit = 10, search = "" } = req.query;
-    const skip = (page - 1) * limit;
-    const eventObjectId = new mongoose.Types.ObjectId(eventId);
-    // Base pipeline stages
-    const basePipeline = [
-      { $unwind: "$visitedEvents" },
-      { $match: { "visitedEvents.eventId": eventObjectId } },
-    ];
-
-    // Add search filter if search term exists
-    const searchPipeline = search
-      ? [
-          {
-            $lookup: {
-              from: "users",
-              localField: "userId",
-              foreignField: "_id",
-              as: "user",
-            },
-          },
-          { $unwind: "$user" },
-          {
-            $match: {
-              $or: [
-                { "user.fullName": { $regex: search, $options: "i" } },
-                { "user.email": { $regex: search, $options: "i" } },
-              ],
-            },
-          },
-        ]
-      : [
-          {
-            $lookup: {
-              from: "users",
-              localField: "userId",
-              foreignField: "_id",
-              as: "user",
-            },
-          },
-          { $unwind: "$user" },
-        ];
-
-    const [guests, totalCount] = await Promise.all([
-      UserEventVisitHistory.aggregate([
-        ...basePipeline,
-        ...searchPipeline,
-        {
-          $project: {
-            "user._id": 1,
-            "user.fullName": 1,
-            "user.email": 1,
-            "user.image": 1,
-            "visitedEvents.selfies": 1,
-            "visitedEvents.privacyAccess": 1,
-            "visitedEvents.firstVisitedAt": 1,
-          },
-        },
-        { $skip: skip },
-        { $limit: parseInt(limit) },
-      ]),
-      UserEventVisitHistory.aggregate([
-        ...basePipeline,
-        ...searchPipeline,
-        { $count: "total" },
-      ]),
-    ]);
-    const total = totalCount[0]?.total || 0;
-    return jsonAll(res, HTTP.SUCCESS, guests, {
-      total,
-      page,
-      totalPages: Math.ceil(total / limit),
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-export default {
-  getAllEvents,
-  getOneEvent,
-  deleteEvent,
-  upsertAlbum,
-  getAllAlbums,
-  getOneAlbum,
-  validateFiles,
-  upsertEnterpriseEvent,
-  generateSmartUploadUrl,
-  completeMultipartUpload,
-  abortMultipartUpload,
-  registerUploads,
-  fileReplacements,
-  failedDeleteImagesFromB2,
-  deleteAlbumImages,
-  deleteAlbum,
-  updateEventSettings,
-  updateEventThemeSettings,
-  getGuestData,
-};
+export default Navbar;
