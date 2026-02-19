@@ -1,1343 +1,920 @@
-// src/app/admin/clients/[clientId]/payment-history/page.jsx
-"use client";
-import LoadingSkeleton from "@/src/loader/LoadingSkeleton";
-import { fetchEnterpriseClientPaymentHistory } from "@/src/redux/features/enterprise/client/clientThunks";
-import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+// controllers/admin/dashboardController.js
+import HTTP from "../../constants/httpStatusCodes.js";
+import EnterpriseClient from "../../models/enterprise/client.js";
+import EnterpriseClientPackage from "../../models/enterprise/clientPackage.js";
+import EnterpriseClientEvent from "../../models/enterprise/event.js";
+import EnterprisePackageHistory from "../../models/enterprise/packageHistory.js";
 import {
-  FiAlertCircle,
-  FiAlertTriangle,
-  FiArrowLeft,
-  FiCalendar,
-  FiCheckCircle,
-  FiClock,
-  FiCreditCard,
-  FiDatabase,
-  FiDollarSign,
-  FiDownload,
-  FiFileText,
-  FiImage,
-  FiLayers,
-  FiPackage,
-  FiRefreshCw,
-  FiShoppingCart,
-  FiTrendingUp,
-  FiUsers,
-  FiXCircle,
-} from "react-icons/fi";
-import { useDispatch, useSelector } from "react-redux";
+  AccountStatus,
+  EventStatus,
+  OnlineRoleType,
+  PaymentStatus,
+  VerifyType,
+} from "../../utils/enums/index.js";
+import { jsonOne } from "../../utils/generalUtils.js";
 
-export default function ClientPaymentHistory() {
-  const dispatch = useDispatch();
-  const { id } = useParams();
-  const { clientPaymentHistory, loading } = useSelector(
-    (state) => state.enterpriseClient
-  );
+// ============================================
+// HELPER: Get Date Range
+// ============================================
+const getDateRange = (period, customStart, customEnd) => {
+  const now = new Date();
+  let startDate, endDate, compareStartDate, compareEndDate;
 
-  const [selectedPayment, setSelectedPayment] = useState(null);
-  const [showModal, setShowModal] = useState(false);
+  switch (period) {
+    case "today":
+      startDate = new Date(now.setHours(0, 0, 0, 0));
+      endDate = new Date(now.setHours(23, 59, 59, 999));
+      compareStartDate = new Date(startDate);
+      compareStartDate.setDate(compareStartDate.getDate() - 1);
+      compareEndDate = new Date(endDate);
+      compareEndDate.setDate(compareEndDate.getDate() - 1);
+      break;
 
-  useEffect(() => {
-    if (id && !clientPaymentHistory) {
-      dispatch(fetchEnterpriseClientPaymentHistory({ id }));
-    }
-  }, [dispatch, id, clientPaymentHistory]);
+    case "yesterday":
+      startDate = new Date(now.setDate(now.getDate() - 1));
+      startDate.setHours(0, 0, 0, 0);
+      endDate = new Date(startDate);
+      endDate.setHours(23, 59, 59, 999);
+      compareStartDate = new Date(startDate);
+      compareStartDate.setDate(compareStartDate.getDate() - 1);
+      compareEndDate = new Date(endDate);
+      compareEndDate.setDate(compareEndDate.getDate() - 1);
+      break;
 
-  const openPaymentDetails = (payment) => {
-    setSelectedPayment(payment);
-    setShowModal(true);
-  };
+    case "week":
+      startDate = new Date(now.setDate(now.getDate() - 7));
+      endDate = new Date();
+      compareStartDate = new Date(startDate);
+      compareStartDate.setDate(compareStartDate.getDate() - 7);
+      compareEndDate = new Date(startDate);
+      break;
 
-  if (loading) return <LoadingSkeleton />;
-  if (!clientPaymentHistory)
-    return <ErrorState message="Error loading payment history" />;
+    case "month":
+      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+      endDate = new Date();
+      compareStartDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      compareEndDate = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        0,
+        23,
+        59,
+        59
+      );
+      break;
 
-  const { actionBreakdown, timeline } = clientPaymentHistory;
+    case "lastMonth":
+      startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+      compareStartDate = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+      compareEndDate = new Date(
+        now.getFullYear(),
+        now.getMonth() - 1,
+        0,
+        23,
+        59,
+        59
+      );
+      break;
 
-  // ✅ Calculate stats on client-side
-  const stats = calculateStats(timeline);
-  return (
-    <div className="min-h-screen">
-      {/* Stats Overview - 2 Rows */}
-      <div className="space-y-4 mb-6">
-        {/* Row 1: Main Metrics */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatsCard
-            label="Total Transactions"
-            value={stats.totalTransactions}
-            icon={<FiFileText className="w-5 h-5" />}
-            color="blue"
-          />
-          <StatsCard
-            label="INR Revenue"
-            value={`₹${formatNumber(stats.INR.totalAmountPaid)}`}
-            icon={<FiDollarSign className="w-5 h-5" />}
-            color="green"
-            subtitle={`${stats.INR.count} transactions`}
-          />
-          <StatsCard
-            label="USD Revenue"
-            value={`$${formatNumber(stats.USD.totalAmountPaid)}`}
-            icon={<FiDollarSign className="w-5 h-5" />}
-            color="green"
-            subtitle={`${stats.USD.count} transactions`}
-          />
-          <StatsCard
-            label="Payment Status"
-            value={stats.successfulPayments}
-            icon={<FiCheckCircle className="w-5 h-5" />}
-            color="green"
-            subtitle={`Failed: ${stats.failedPayments} | Pending: ${stats.pendingPayments}`}
-          />
-        </div>
+    case "year":
+      startDate = new Date(now.getFullYear(), 0, 1);
+      endDate = new Date();
+      compareStartDate = new Date(now.getFullYear() - 1, 0, 1);
+      compareEndDate = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59);
+      break;
 
-        {/* Row 2: Financial Breakdown */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatsCard
-            label="Total Discounts"
-            value={
-              <span className="space-y-1">
-                <span className="text-sm">
-                  ₹{formatNumber(stats.INR.totalDiscounts)}
-                </span>
-                <span className="text-sm">
-                  ${formatNumber(stats.USD.totalDiscounts)}
-                </span>
-              </span>
-            }
-            icon={<FiDollarSign className="w-5 h-5" />}
-            color="orange"
-            subtitle="INR / USD"
-          />
-          <StatsCard
-            label="Credit Applied"
-            value={
-              <span className="space-y-1">
-                <span className="text-sm">
-                  ₹{formatNumber(stats.INR.totalCreditApplied)}
-                </span>
-                <span className="text-sm">
-                  ${formatNumber(stats.USD.totalCreditApplied)}
-                </span>
-              </span>
-            }
-            icon={<FiRefreshCw className="w-5 h-5" />}
-            color="blue"
-            subtitle="INR / USD"
-          />
-          <StatsCard
-            label="Total Profit"
-            value={
-              <span className="space-y-1">
-                <span className="text-sm">
-                  ₹{formatNumber(stats.INR.totalCreditLost)}
-                </span>
-                <span className="text-sm">
-                  ${formatNumber(stats.USD.totalCreditLost)}
-                </span>
-              </span>
-            }
-            icon={<FiTrendingUp className="w-5 h-5" />}
-            color="purple"
-            subtitle="Credit Lost"
-          />
-          <StatsCard
-            label="Razorpay Fees (INR)"
-            value={`₹${formatNumber(
-              stats.INR.totalRazorpayFees + stats.USD.totalRazorpayFees
-            )}`}
-            icon={<FiCreditCard className="w-5 h-5" />}
-            color="orange"
-            subtitle={`GST: ₹${formatNumber(
-              stats.INR.totalRazorpayTax + stats.USD.totalRazorpayTax
-            )}`}
-          />
-        </div>
-      </div>
+    case "custom":
+      startDate = new Date(customStart);
+      endDate = new Date(customEnd);
+      const diffTime = Math.abs(endDate - startDate);
+      compareStartDate = new Date(startDate);
+      compareStartDate.setTime(compareStartDate.getTime() - diffTime);
+      compareEndDate = new Date(startDate);
+      break;
 
-      {/* Action Breakdown */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
-        <h2 className="text-lg font-semibold text-[#343148] mb-4">
-          Action Breakdown
-        </h2>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
-          <ActionBadge
-            label="Trial"
-            count={actionBreakdown.trial}
-            icon={<FiClock />}
-            color="gray"
-          />
-          <ActionBadge
-            label="Purchase"
-            count={actionBreakdown.purchase}
-            icon={<FiShoppingCart />}
-            color="blue"
-          />
-          <ActionBadge
-            label="Upgrade"
-            count={actionBreakdown.upgrade}
-            icon={<FiTrendingUp />}
-            color="purple"
-          />
-          <ActionBadge
-            label="Renewal"
-            count={actionBreakdown.renewal}
-            icon={<FiRefreshCw />}
-            color="green"
-          />
-          <ActionBadge
-            label="Expired"
-            count={actionBreakdown.expired}
-            icon={<FiAlertCircle />}
-            color="red"
-          />
-        </div>
-      </div>
+    default:
+      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+      endDate = new Date();
+      compareStartDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      compareEndDate = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        0,
+        23,
+        59,
+        59
+      );
+  }
 
-      {/* Timeline View */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-        <h2 className="text-lg font-semibold text-[#343148] mb-6">
-          Transaction Timeline
-        </h2>
-
-        <div className="relative">
-          {/* Timeline Line */}
-          <div className="absolute left-8 top-0 bottom-0 w-0.5 bg-gradient-to-b from-[#343148] via-[#D7C39D] to-gray-200" />
-
-          {timeline.map((period, periodIdx) => (
-            <div key={periodIdx} className="mb-8 last:mb-0">
-              {/* Month Header */}
-              <div className="flex items-center gap-4 mb-4 relative">
-                <div className="w-16 h-16 rounded-full bg-gradient-to-br from-[#343148] to-[#D7C39D] flex items-center justify-center text-white font-bold shadow-lg z-10">
-                  <div className="text-center">
-                    <div className="text-xs">{period.month.slice(0, 3)}</div>
-                    <div className="text-sm">{period.year}</div>
-                  </div>
-                </div>
-                <div className="text-sm text-gray-500">
-                  {period.payments.length} transaction
-                  {period.payments.length > 1 ? "s" : ""}
-                </div>
-              </div>
-
-              {/* Payment Cards */}
-              <div className="ml-24 space-y-4">
-                {period.payments.map((payment, payIdx) => (
-                  <PaymentCard
-                    key={payIdx}
-                    payment={payment}
-                    onClick={() => openPaymentDetails(payment)}
-                  />
-                ))}
-              </div>
-            </div>
-          ))}
-
-          {timeline.length === 0 && (
-            <div className="text-center py-12">
-              <FiFileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-              <p className="text-gray-500">No payment history found</p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Payment Details Modal */}
-      {showModal && selectedPayment && (
-        <PaymentDetailsModal
-          payment={selectedPayment}
-          onClose={() => setShowModal(false)}
-        />
-      )}
-    </div>
-  );
-}
-
-// ============ COMPONENTS ============
-
-const StatsCard = ({ label, value, icon, color, subtitle }) => {
-  const colorClasses = {
-    blue: "from-blue-500 to-blue-600",
-    green: "from-green-500 to-green-600",
-    orange: "from-orange-500 to-orange-600",
-    purple: "from-purple-500 to-purple-600",
-  };
-
-  return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 hover:shadow-md transition-all">
-      <div className="flex items-center gap-3 mb-2">
-        <div
-          className={`w-10 h-10 rounded-lg bg-gradient-to-br ${colorClasses[color]} flex items-center justify-center text-white`}
-        >
-          {icon}
-        </div>
-        <div className="flex-1">
-          <p className="text-xs text-gray-600 font-medium">{label}</p>
-          <p className="text-xl font-bold text-[#343148]">{value}</p>
-        </div>
-      </div>
-      {subtitle && (
-        <p className="text-xs text-gray-500 mt-1 ml-13">{subtitle}</p>
-      )}
-    </div>
-  );
+  return { startDate, endDate, compareStartDate, compareEndDate };
 };
 
-const ActionBadge = ({ label, count, icon, color }) => {
-  const colorClasses = {
-    blue: "bg-blue-50 text-blue-700 border-blue-200",
-    green: "bg-green-50 text-green-700 border-green-200",
-    purple: "bg-purple-50 text-purple-700 border-purple-200",
-    orange: "bg-orange-50 text-orange-700 border-orange-200",
-    gray: "bg-gray-50 text-gray-700 border-gray-200",
-  };
-
-  return (
-    <div
-      className={`${colorClasses[color]} border rounded-lg p-3 flex items-center gap-2`}
-    >
-      <div className="text-lg">{icon}</div>
-      <div>
-        <p className="text-xs font-medium opacity-80">{label}</p>
-        <p className="text-lg font-bold">{count}</p>
-      </div>
-    </div>
-  );
-};
-
-const PaymentCard = ({ payment, onClick }) => {
-  const { paymentDetails, packageId, action, usageAtAction } = payment;
-  const statusConfig = getPaymentStatusConfig(paymentDetails.paymentStatus);
-  const actionConfig = getActionConfig(action);
-
-  // ✅ Get currency symbol dynamically
-  const currencySymbol =
-    paymentDetails.symbol || (paymentDetails.currency === "INR" ? "₹" : "$");
-  const currency = paymentDetails.currency || "USD";
-  return (
-    <div
-      onClick={onClick}
-      className="bg-white border border-gray-200 rounded-xl p-5 hover:shadow-lg hover:border-[#D7C39D] transition-all cursor-pointer group"
-    >
-      <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
-        {/* Left Section */}
-        <div className="flex items-start gap-3 flex-1">
-          <div
-            className={`w-12 h-12 rounded-lg ${actionConfig.bgColor} flex items-center justify-center text-white flex-shrink-0`}
-          >
-            {actionConfig.icon}
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1">
-              <h3 className="text-base font-semibold text-[#343148] truncate">
-                {packageId?.packageName || "Package"}
-              </h3>
-              <span
-                className={`px-2 py-0.5 rounded-full text-xs font-medium ${actionConfig.badgeColor}`}
-              >
-                {action.toUpperCase()}
-              </span>
-            </div>
-            <p className="text-xs text-gray-500">
-              {formatDate(payment.createdAt)} • {formatTime(payment.createdAt)}
-            </p>
-          </div>
-        </div>
-
-        {/* Right Section - Amount with Dynamic Currency */}
-        <div className="text-right">
-          <p className="text-2xl font-bold text-[#343148]">
-            {currencySymbol}
-            {formatNumber(paymentDetails.amountPaid || 0)}
-          </p>
-          <p className="text-xs text-gray-500 font-medium mb-1">{currency}</p>
-        </div>
-      </div>
-
-      {/* Payment Details Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-        <DetailItem
-          icon={<FiCalendar />}
-          label="Duration"
-          value={`${calculateDuration(
-            payment.startDate,
-            payment.endDate
-          )} days`}
-        />
-        <DetailItem
-          icon={<FiFileText />}
-          label="Invoice"
-          value={paymentDetails.invoiceNumber || "N/A"}
-        />
-        <DetailItem
-          icon={<FiClock />}
-          label="Payment"
-          value={paymentDetails.paymentMethod || "N/A"}
-        />
-        <DetailItem
-          icon={statusConfig.icon}
-          label="Status"
-          value={
-            <span className={`font-medium ${statusConfig.textColor}`}>
-              {paymentDetails.paymentStatus}
-            </span>
-          }
-        />
-      </div>
-
-      {/* Usage Stats */}
-      {usageAtAction && (
-        <div className="bg-gray-50 rounded-lg p-3">
-          <p className="text-xs font-semibold text-gray-600 mb-2">
-            Usage at Transaction
-          </p>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            <UsageItem
-              icon={<FiCalendar />}
-              label="Events"
-              value={usageAtAction.totalEvents || 0}
-            />
-            <UsageItem
-              icon={<FiLayers />}
-              label="Albums"
-              value={usageAtAction.totalAlbums || 0}
-            />
-            <UsageItem
-              icon={<FiImage />}
-              label="Photos"
-              value={formatNumber(usageAtAction.totalPhotos || 0)}
-            />
-            <UsageItem
-              icon={<FiDatabase />}
-              label="Storage"
-              value={`${((usageAtAction.totalMBUsed || 0) / 1024).toFixed(
-                1
-              )} GB`}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Hover Effect Indicator */}
-      <div className="mt-3 flex items-center justify-between text-xs text-gray-400 group-hover:text-[#D7C39D] transition-colors">
-        <span>Click to view full details</span>
-        <FiArrowLeft className="rotate-180" />
-      </div>
-    </div>
-  );
-};
-
-const DetailItem = ({ icon, label, value }) => (
-  <div className="flex items-center gap-2">
-    <div className="text-gray-400">{icon}</div>
-    <div>
-      <p className="text-xs text-gray-500">{label}</p>
-      <p className="text-sm font-medium text-gray-900">{value}</p>
-    </div>
-  </div>
-);
-
-const UsageItem = ({ icon, label, value }) => (
-  <div className="flex items-center gap-2">
-    <div className="text-[#343148] text-sm">{icon}</div>
-    <div>
-      <p className="text-xs text-gray-600">{label}</p>
-      <p className="text-sm font-bold text-[#343148]">{value}</p>
-    </div>
-  </div>
-);
-
-const PaymentDetailsModal = ({ payment, onClose }) => {
-  const { paymentDetails, packageDetails, packageId, previousPackageId } =
-    payment;
-
-  return (
-    <div
-      className="fixed inset-0 bg-black/50 bg-opacity-50 flex items-center justify-center z-50 p-4"
-      onClick={onClose}
-    >
-      <div
-        className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Modal Header */}
-        <div className="sticky top-0 bg-gradient-to-r from-[#343148] to-[#D7C39D] text-white p-6 rounded-t-2xl">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-2xl font-bold">Payment Details</h2>
-              <p className="text-sm opacity-90 mt-1">
-                Transaction ID: {payment._id}
-              </p>
-            </div>
-            <button
-              onClick={onClose}
-              className="w-10 h-10 rounded-full flex items-center justify-center transition-all"
-            >
-              <FiXCircle className="w-6 h-6 text-primary" />
-            </button>
-          </div>
-        </div>
-
-        {/* Modal Body */}
-        <div className="p-6 space-y-6">
-          {/* Payment Information */}
-          <Section title="Payment Information" icon={<FiDollarSign />}>
-            {/* PRIMARY PRICING */}
-            <div className="mb-4">
-              <h4 className="text-sm font-semibold text-gray-700 mb-3">
-                Pricing Breakdown
-              </h4>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 p-4 bg-emerald-50 rounded-lg border border-emerald-200">
-                <PaymentDetailBox
-                  label="Original Price"
-                  value={`${paymentDetails.symbol || "$"}${formatNumber(
-                    paymentDetails.packageOriginalPrice || 0
-                  )}`}
-                  color="emerald"
-                />
-                <PaymentDetailBox
-                  label="Package Cost"
-                  value={`${paymentDetails.symbol || "$"}${formatNumber(
-                    paymentDetails.packageCost || 0
-                  )}`}
-                  color="emerald"
-                />
-                <PaymentDetailBox
-                  label="Amount Paid"
-                  value={`${paymentDetails.symbol || "$"}${formatNumber(
-                    paymentDetails.amountPaid || 0
-                  )}`}
-                  color="emerald"
-                />
-              </div>
-            </div>
-
-            {/* DISCOUNTS & CREDITS */}
-            <div className="mb-4">
-              <h4 className="text-sm font-semibold text-gray-700 mb-3">
-                Discounts & Credits
-              </h4>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-4 bg-orange-50 rounded-lg border border-orange-200">
-                {paymentDetails.packageDiscount > 0 && (
-                  <PaymentDetailBox
-                    label={`Discount ${paymentDetails.packageDiscount}%`}
-                    value={`-${paymentDetails.symbol || "$"}${formatNumber(
-                      paymentDetails.packageDiscountAmount || 0
-                    )}`}
-                    color="orange"
-                  />
-                )}
-                {paymentDetails.proratedCreditFull > 0 && (
-                  <PaymentDetailBox
-                    label="Credit (Full)"
-                    value={`${
-                      paymentDetails.symbol || "$"
-                    }${paymentDetails.proratedCreditFull?.toFixed(2)}`}
-                    color="orange"
-                  />
-                )}
-                {paymentDetails.proratedCreditApplied > 0 && (
-                  <PaymentDetailBox
-                    label="Credit Applied"
-                    value={`-${
-                      paymentDetails.symbol || "$"
-                    }${paymentDetails.proratedCreditApplied?.toFixed(2)}`}
-                    color="orange"
-                  />
-                )}
-                {paymentDetails.proratedCreditLost > 0 && (
-                  <PaymentDetailBox
-                    label="Credit Lost (Profit)"
-                    value={`${
-                      paymentDetails.symbol || "$"
-                    }${paymentDetails.proratedCreditLost?.toFixed(2)}`}
-                    color="red"
-                  />
-                )}
-              </div>
-            </div>
-
-            {/* TRANSACTION DETAILS */}
-            <div className="mb-4">
-              <h4 className="text-sm font-semibold text-gray-700 mb-3">
-                Transaction Fees (INR)
-              </h4>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 p-4 bg-purple-50 rounded-lg border border-purple-200">
-                {paymentDetails.amountDue !== undefined && (
-                  <PaymentDetailBox
-                    label="Amount Due"
-                    value={`${paymentDetails.symbol || "$"}${formatNumber(
-                      paymentDetails.amountDue
-                    )}`}
-                    color="purple"
-                  />
-                )}
-                {paymentDetails.fee > 0 && (
-                  <PaymentDetailBox
-                    label="Razorpay Fee"
-                    value={`₹${(paymentDetails.fee / 100)?.toFixed(2)}`}
-                    color="purple"
-                  />
-                )}
-                {paymentDetails.tax > 0 && (
-                  <PaymentDetailBox
-                    label="GST (18%)"
-                    value={`₹${(paymentDetails.tax / 100)?.toFixed(2)}`}
-                    color="purple"
-                  />
-                )}
-              </div>
-            </div>
-
-            {/* OTHER INFO */}
-            <InfoGrid>
-              {paymentDetails.paymentStatus && (
-                <InfoItem
-                  label="Payment Status"
-                  value={
-                    <span
-                      className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                        getPaymentStatusConfig(paymentDetails.paymentStatus)
-                          .badgeColor
-                      }`}
-                    >
-                      {paymentDetails.paymentStatus}
-                    </span>
-                  }
-                />
-              )}
-              {paymentDetails.paymentMethod && (
-                <InfoItem
-                  label="Payment Method"
-                  value={paymentDetails.paymentMethod.toUpperCase()}
-                />
-              )}
-              {paymentDetails.currency && (
-                <InfoItem
-                  label="Currency"
-                  value={`${paymentDetails.currency} (${
-                    paymentDetails.symbol || "$"
-                  })`}
-                />
-              )}
-              {paymentDetails.paymentDate && (
-                <InfoItem
-                  label="Payment Date"
-                  value={formatFullDate(paymentDetails.paymentDate)}
-                />
-              )}
-              {paymentDetails.cardId && (
-                <InfoItem
-                  label="Card ID"
-                  value={paymentDetails.cardId}
-                  copyable
-                />
-              )}
-              {paymentDetails.acquirerData?.auth_code && (
-                <InfoItem
-                  label="Auth Code"
-                  value={paymentDetails.acquirerData.auth_code}
-                />
-              )}
-            </InfoGrid>
-          </Section>
-
-          {/* Razorpay Details */}
-          <Section title="Razorpay Details" icon={<FiFileText />}>
-            <InfoGrid>
-              <InfoItem
-                label="Order ID"
-                value={paymentDetails.razorpayOrderId || "N/A"}
-                copyable
-              />
-              <InfoItem
-                label="Payment ID"
-                value={paymentDetails.razorpayPaymentId || "N/A"}
-                copyable
-              />
-              <InfoItem
-                label="Invoice Number"
-                value={paymentDetails.invoiceNumber || "N/A"}
-              />
-              <InfoItem
-                label="Invoice URL"
-                value={
-                  paymentDetails.invoiceUrl ? (
-                    <a
-                      href={paymentDetails.invoiceUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-[#343148] hover:text-[#D7C39D] underline flex items-center gap-1"
-                    >
-                      Download <FiDownload className="w-3 h-3" />
-                    </a>
-                  ) : (
-                    "N/A"
-                  )
-                }
-              />
-            </InfoGrid>
-            {paymentDetails.failureReason && (
-              <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
-                <p className="text-xs font-semibold text-red-700 mb-1">
-                  Failure Reason:
-                </p>
-                <p className="text-sm text-red-600">
-                  {paymentDetails.failureReason}
-                </p>
-              </div>
-            )}
-          </Section>
-
-          {/* Package Information */}
-          <Section title="Package Information" icon={<FiPackage />}>
-            <InfoGrid>
-              <InfoItem
-                label="Package Name"
-                value={
-                  packageId?.packageName || packageDetails?.packageName || "N/A"
-                }
-              />
-              <InfoItem
-                label="Action Type"
-                value={
-                  <span
-                    className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                      getActionConfig(payment.action).badgeColor
-                    }`}
-                  >
-                    {payment.action.toUpperCase()}
-                  </span>
-                }
-              />
-              <InfoItem
-                label="Start Date"
-                value={
-                  payment.startDate ? formatFullDate(payment.startDate) : "N/A"
-                }
-              />
-              <InfoItem
-                label="End Date"
-                value={
-                  payment.endDate ? formatFullDate(payment.endDate) : "N/A"
-                }
-              />
-              <InfoItem
-                label="Validity"
-                value={`${calculateDuration(
-                  payment.startDate,
-                  payment.endDate
-                )} days`}
-              />
-              <InfoItem
-                label="Is Active"
-                value={
-                  payment.isActive ? (
-                    <FiCheckCircle className="w-5 h-5 text-green-600" />
-                  ) : (
-                    <FiXCircle className="w-5 h-5 text-red-600" />
-                  )
-                }
-              />
-            </InfoGrid>
-            {previousPackageId && (
-              <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                <p className="text-xs font-semibold text-blue-700">
-                  Previous Package: {previousPackageId.packageName}
-                </p>
-              </div>
-            )}
-          </Section>
-
-          {/* Package Details (Features) */}
-          {packageDetails && (
-            <Section title="Package Features" icon={<FiLayers />}>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                <FeatureItem
-                  label="Total Storage"
-                  value={`${packageDetails.totalPhotoMB} MB`}
-                />
-                <FeatureItem
-                  label="Event Limit"
-                  value={packageDetails.eventLimit}
-                />
-                <FeatureItem
-                  label="Images per Album"
-                  value={packageDetails.imageLimitPerAlbum}
-                />
-                <FeatureItem
-                  label="Max Photo Size"
-                  value={`${packageDetails.maximumPhotoSize} MB`}
-                />
-                <FeatureItem
-                  label="Guests per Event"
-                  value={packageDetails.totalGuestsAllowPerEvent}
-                />
-                <FeatureItem
-                  label="Face Recognition"
-                  enabled={packageDetails.faceRecognition}
-                />
-                <FeatureItem
-                  label="Custom Themes"
-                  enabled={packageDetails.customisableEventThemes}
-                />
-                <FeatureItem
-                  label="Guest Uploads"
-                  enabled={packageDetails.guestUploads}
-                />
-                <FeatureItem
-                  label="Bulk Download"
-                  enabled={packageDetails.bulkDownload}
-                />
-                <FeatureItem
-                  label="Analytics"
-                  enabled={packageDetails.analytics}
-                />
-                <FeatureItem label="QR Code" enabled={packageDetails.qrCode} />
-                <FeatureItem
-                  label="Watermark"
-                  enabled={packageDetails.watermark}
-                />
-              </div>
-            </Section>
-          )}
-
-          {/* Usage at Action */}
-          {payment.usageAtAction && (
-            <Section title="Usage at Transaction Time" icon={<FiDatabase />}>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                <UsageCard
-                  icon={<FiCalendar />}
-                  label="Events"
-                  value={payment.usageAtAction.totalEvents || 0}
-                  color="blue"
-                />
-                <UsageCard
-                  icon={<FiLayers />}
-                  label="Albums"
-                  value={payment.usageAtAction.totalAlbums || 0}
-                  color="purple"
-                />
-                <UsageCard
-                  icon={<FiImage />}
-                  label="Photos"
-                  value={formatNumber(payment.usageAtAction.totalPhotos || 0)}
-                  color="green"
-                />
-                <UsageCard
-                  icon={<FiDatabase />}
-                  label="Storage"
-                  value={`${(
-                    (payment.usageAtAction.totalMBUsed || 0) / 1024
-                  ).toFixed(2)} GB`}
-                  color="orange"
-                />
-                <UsageCard
-                  icon={<FiUsers />}
-                  label="Guests"
-                  value={payment.usageAtAction.activeGuests || 0}
-                  color="pink"
-                />
-              </div>
-            </Section>
-          )}
-
-          {/* Notes */}
-          {(payment.notes || payment.systemNotes) && (
-            <Section title="Notes" icon={<FiFileText />}>
-              {payment.notes && (
-                <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                  <p className="text-xs font-semibold text-blue-700 mb-1">
-                    User Notes:
-                  </p>
-                  <p className="text-sm text-blue-900">{payment.notes}</p>
-                </div>
-              )}
-              {payment.systemNotes && (
-                <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
-                  <p className="text-xs font-semibold text-gray-700 mb-1">
-                    System Notes:
-                  </p>
-                  <p className="text-sm text-gray-900">{payment.systemNotes}</p>
-                </div>
-              )}
-            </Section>
-          )}
-
-          {/* Timestamps */}
-          <Section title="Timestamps" icon={<FiClock />}>
-            <InfoGrid>
-              <InfoItem
-                label="Created At"
-                value={formatFullDate(payment.createdAt)}
-              />
-              <InfoItem
-                label="Updated At"
-                value={formatFullDate(payment.updatedAt)}
-              />
-            </InfoGrid>
-          </Section>
-        </div>
-
-        {/* Modal Footer */}
-        <div className="sticky bottom-0 bg-gray-50 p-4 rounded-b-2xl border-t border-gray-200">
-          <button
-            onClick={onClose}
-            className="w-full py-3 bg-[#343148] text-white rounded-lg hover:bg-[#D7C39D] transition-colors font-medium"
-          >
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const Section = ({ title, icon, children }) => (
-  <div className="border border-gray-200 rounded-xl p-5 bg-gray-50">
-    <div className="flex items-center gap-2 mb-4">
-      <div className="text-[#343148] text-lg">{icon}</div>
-      <h3 className="text-base font-semibold text-[#343148]">{title}</h3>
-    </div>
-    {children}
-  </div>
-);
-
-const InfoGrid = ({ children }) => (
-  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{children}</div>
-);
-
-const InfoItem = ({ label, value, highlight, copyable }) => {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = () => {
-    if (typeof value === "string") {
-      navigator.clipboard.writeText(value);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
-
-  const highlightColors = {
-    green: "text-green-600",
-    blue: "text-[#343148]",
-  };
-
-  return (
-    <div className="flex flex-col">
-      <p className="text-xs text-gray-500 font-medium mb-1">{label}</p>
-      <div className="flex items-center gap-2">
-        <p
-          className={`text-sm font-semibold ${
-            highlight ? highlightColors[highlight] : "text-gray-900"
-          }`}
-        >
-          {value}
-        </p>
-        {copyable && (
-          <button
-            onClick={handleCopy}
-            className="text-[#343148] hover:text-[#D7C39D] transition-colors"
-            title="Copy to clipboard"
-          >
-            {copied ? (
-              <FiCheckCircle className="w-4 h-4 text-green-600" />
-            ) : (
-              <FiFileText className="w-4 h-4" />
-            )}
-          </button>
-        )}
-      </div>
-    </div>
-  );
-};
-
-const FeatureItem = ({ label, value, enabled }) => (
-  <div className="flex items-center justify-between p-2 bg-white rounded-lg border border-gray-200">
-    <span className="text-xs text-gray-700">{label}</span>
-    {enabled !== undefined ? (
-      enabled ? (
-        <FiCheckCircle className="w-4 h-4 text-green-600" />
-      ) : (
-        <FiXCircle className="w-4 h-4 text-red-600" />
-      )
-    ) : (
-      <span className="text-xs font-semibold text-[#343148]">{value}</span>
-    )}
-  </div>
-);
-
-const UsageCard = ({ icon, label, value, color }) => {
-  const colorClasses = {
-    blue: "from-blue-500 to-blue-600",
-    purple: "from-purple-500 to-purple-600",
-    green: "from-green-500 to-green-600",
-    orange: "from-orange-500 to-orange-600",
-    pink: "from-pink-500 to-pink-600",
-  };
-
-  return (
-    <div className="bg-white rounded-lg p-4 border border-gray-200 text-center">
-      <div
-        className={`w-10 h-10 rounded-lg bg-gradient-to-br ${colorClasses[color]} flex items-center justify-center text-white mx-auto mb-2`}
-      >
-        {icon}
-      </div>
-      <p className="text-xs text-gray-600 mb-1">{label}</p>
-      <p className="text-lg font-bold text-[#343148]">{value}</p>
-    </div>
-  );
-};
-
-const ErrorState = ({ message }) => (
-  <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
-    <div className="text-center p-8 max-w-md bg-white rounded-2xl shadow-lg border">
-      <FiAlertTriangle className="w-16 h-16 text-red-500 mx-auto mb-4" />
-      <h3 className="text-lg font-bold text-gray-900 mb-4">{message}</h3>
-      <button
-        onClick={() => window.history.back()}
-        className="px-6 py-3 bg-[#343148] text-white font-semibold rounded-lg hover:bg-[#D7C39D] hover:text-[#343148] transition-all"
-      >
-        ← Go Back
-      </button>
-    </div>
-  </div>
-);
-// ============ UTILITY FUNCTIONS ============
-
-const getPaymentStatusConfig = (status) => {
-  const configs = {
-    success: {
-      icon: <FiCheckCircle />,
-      textColor: "text-green-600",
-      badgeColor: "bg-green-100 text-green-800",
-    },
-    failed: {
-      icon: <FiXCircle />,
-      textColor: "text-red-600",
-      badgeColor: "bg-red-100 text-red-800",
-    },
-    pending: {
-      icon: <FiClock />,
-      textColor: "text-orange-600",
-      badgeColor: "bg-orange-100 text-orange-800",
-    },
-  };
-  return configs[status] || configs.pending;
-};
-
-const getActionConfig = (action) => {
-  const configs = {
-    // Trial Actions
-    trial_started: {
-      icon: <FiClock className="w-6 h-6" />,
-      bgColor: "bg-gradient-to-br from-gray-500 to-gray-600",
-      badgeColor: "bg-gray-100 text-gray-800",
-      label: "Trial Started",
-    },
-    trial_upgraded: {
-      icon: <FiTrendingUp className="w-6 h-6" />,
-      bgColor: "bg-gradient-to-br from-purple-500 to-purple-600",
-      badgeColor: "bg-purple-100 text-purple-800",
-      label: "Trial Upgraded",
-    },
-    trial_expired: {
-      icon: <FiXCircle className="w-6 h-6" />,
-      bgColor: "bg-gradient-to-br from-red-500 to-red-600",
-      badgeColor: "bg-red-100 text-red-800",
-      label: "Trial Expired",
-    },
-
-    // Subscription Actions
-    subscription_started: {
-      icon: <FiShoppingCart className="w-6 h-6" />,
-      bgColor: "bg-gradient-to-br from-blue-500 to-blue-600",
-      badgeColor: "bg-blue-100 text-blue-800",
-      label: "Subscription Started",
-    },
-    subscription_changed: {
-      icon: <FiRefreshCw className="w-6 h-6" />,
-      bgColor: "bg-gradient-to-br from-indigo-500 to-indigo-600",
-      badgeColor: "bg-indigo-100 text-indigo-800",
-      label: "Subscription Changed",
-    },
-    subscription_renewed: {
-      icon: <FiRefreshCw className="w-6 h-6" />,
-      bgColor: "bg-gradient-to-br from-green-500 to-green-600",
-      badgeColor: "bg-green-100 text-green-800",
-      label: "Subscription Renewed",
-    },
-    subscription_expired: {
-      icon: <FiXCircle className="w-6 h-6" />,
-      bgColor: "bg-gradient-to-br from-red-500 to-red-600",
-      badgeColor: "bg-red-100 text-red-800",
-      label: "Subscription Expired",
-    },
-
-    // Upgrade/Renewal Actions
-    upgrade_initiated: {
-      icon: <FiTrendingUp className="w-6 h-6" />,
-      bgColor: "bg-gradient-to-br from-purple-500 to-purple-600",
-      badgeColor: "bg-purple-100 text-purple-800",
-      label: "Upgrade Initiated",
-    },
-    renewal_initiated: {
-      icon: <FiClock className="w-6 h-6" />,
-      bgColor: "bg-gradient-to-br from-green-500 to-green-600",
-      badgeColor: "bg-green-100 text-green-800",
-      label: "Renewal Initiated",
-    },
-  };
-
-  return (
-    configs[action] || {
-      icon: <FiFileText className="w-6 h-6" />,
-      bgColor: "bg-gradient-to-br from-gray-500 to-gray-600",
-      badgeColor: "bg-gray-100 text-gray-800",
-      label: action.replace(/_/g, " ").toUpperCase(),
-    }
-  );
-};
-
-const formatNumber = (num) => {
-  if (!num) return "0";
-  return new Intl.NumberFormat("en-IN").format(num);
-};
-
-const formatDate = (date) => {
-  return new Date(date).toLocaleDateString("en-IN", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-};
-
-const formatTime = (date) => {
-  return new Date(date).toLocaleTimeString("en-IN", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-};
-
-const formatFullDate = (date) => {
-  return new Date(date).toLocaleDateString("en-IN", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-};
-
-const calculateDuration = (startDate, endDate) => {
-  if (!startDate || !endDate) return 0;
-  const start = new Date(startDate);
-  const end = new Date(endDate);
-  const diffTime = Math.abs(end - start);
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-  return diffDays;
-};
-
-const PaymentDetailBox = ({ label, value, color = "emerald" }) => {
-  const colorClasses = {
-    emerald: "text-emerald-700 font-black",
-    orange: "text-orange-700 font-black",
-    purple: "text-purple-700 font-black",
-    red: "text-red-700 font-black",
-  };
-
-  return (
-    <div className="bg-white rounded-lg p-3 shadow-sm">
-      <div className="text-xs text-gray-600 uppercase tracking-wide font-medium mb-1">
-        {label}
-      </div>
-      <div className={`text-lg ${colorClasses[color]}`}>{value}</div>
-    </div>
-  );
-};
-
-// ============ CLIENT-SIDE STATS CALCULATION ============
-const calculateStats = (timeline) => {
-  // Flatten all payments from timeline
-  const allPayments = timeline.flatMap((period) => period.payments);
-
-  // Filter by payment status
-  const completedPayments = allPayments.filter(
-    (p) => p.paymentDetails.paymentStatus === "completed"
-  );
-  const failedPayments = allPayments.filter(
-    (p) => p.paymentDetails.paymentStatus === "failed"
-  );
-  const pendingPayments = allPayments.filter(
-    (p) => p.paymentDetails.paymentStatus === "pending"
-  );
-
-  // Separate by currency
-  const inrPayments = completedPayments.filter(
-    (p) => p.paymentDetails.currency === "INR"
-  );
-  const usdPayments = completedPayments.filter(
-    (p) => p.paymentDetails.currency === "USD"
-  );
-
-  // Calculate INR metrics
-  const inrStats = {
-    totalAmountPaid: inrPayments.reduce(
-      (sum, p) => sum + (p.paymentDetails.amountPaid || 0),
-      0
-    ),
-    totalOriginalAmount: inrPayments.reduce(
-      (sum, p) => sum + (p.paymentDetails.packageOriginalPrice || 0),
-      0
-    ),
-    totalDiscounts: inrPayments.reduce(
-      (sum, p) => sum + (p.paymentDetails.packageDiscountAmount || 0),
-      0
-    ),
-    totalCreditApplied: inrPayments.reduce(
-      (sum, p) => sum + (p.paymentDetails.proratedCreditApplied || 0),
-      0
-    ),
-    totalCreditLost: inrPayments.reduce(
-      (sum, p) => sum + (p.paymentDetails.proratedCreditLost || 0),
-      0
-    ),
-    totalRazorpayFees: inrPayments.reduce(
-      (sum, p) => sum + (p.paymentDetails.fee || 0) / 100,
-      0
-    ),
-    totalRazorpayTax: inrPayments.reduce(
-      (sum, p) => sum + (p.paymentDetails.tax || 0) / 100,
-      0
-    ),
-    count: inrPayments.length,
-  };
-
-  // Calculate USD metrics
-  const usdStats = {
-    totalAmountPaid: usdPayments.reduce(
-      (sum, p) => sum + (p.paymentDetails.amountPaid || 0),
-      0
-    ),
-    totalOriginalAmount: usdPayments.reduce(
-      (sum, p) => sum + (p.paymentDetails.packageOriginalPrice || 0),
-      0
-    ),
-    totalDiscounts: usdPayments.reduce(
-      (sum, p) => sum + (p.paymentDetails.packageDiscountAmount || 0),
-      0
-    ),
-    totalCreditApplied: usdPayments.reduce(
-      (sum, p) => sum + (p.paymentDetails.proratedCreditApplied || 0),
-      0
-    ),
-    totalCreditLost: usdPayments.reduce(
-      (sum, p) => sum + (p.paymentDetails.proratedCreditLost || 0),
-      0
-    ),
-    totalRazorpayFees: usdPayments.reduce(
-      (sum, p) => sum + (p.paymentDetails.fee || 0) / 100,
-      0
-    ),
-    totalRazorpayTax: usdPayments.reduce(
-      (sum, p) => sum + (p.paymentDetails.tax || 0) / 100,
-      0
-    ),
-    count: usdPayments.length,
-  };
-
-  return {
-    totalTransactions: allPayments.length,
-    successfulPayments: completedPayments.length,
-    failedPayments: failedPayments.length,
-    pendingPayments: pendingPayments.length,
-    totalProfit: inrStats.totalCreditLost + usdStats.totalCreditLost,
-    INR: inrStats,
-    USD: usdStats,
-  };
-};
-
-
-
-
-
-
-
-
-
-/* client package payment-history  */
-const getClientPackagePaymentHistory = async (req, res, next) => {
+// ============================================
+// 1. DASHBOARD OVERVIEW - SINGLE AGGREGATION
+// ============================================
+const getDashboardOverview = async (req, res, next) => {
   try {
-    const { clientId } = req.params;
+    // SINGLE AGGREGATION FOR CLIENTS
+    const clientStats = await EnterpriseClient.aggregate([
+      {
+        $facet: {
+          counts: [
+            { $match: { deletedAt: null } },
+            {
+              $group: {
+                _id: null,
+                total: { $sum: 1 },
+                active: {
+                  $sum: {
+                    $cond: [{ $eq: ["$status", AccountStatus.ACTIVATE] }, 1, 0],
+                  },
+                },
+                verified: {
+                  $sum: {
+                    $cond: [{ $eq: ["$verify", VerifyType.VERIFIED] }, 1, 0],
+                  },
+                },
+                online: {
+                  $sum: {
+                    $cond: [
+                      { $eq: ["$is_Online", OnlineRoleType.ONLINE] },
+                      1,
+                      0,
+                    ],
+                  },
+                },
+              },
+            },
+          ],
+        },
+      },
+    ]);
 
-    // Fetch ALL payment history (no limit, no pagination)
-    const paymentHistory = await EnterprisePackageHistory.find({
-      enterpriseClientId: clientId,
-    })
-      .populate("packageId", "packageName cost discount validityInDays")
-      .populate("previousPackageId", "packageName")
-      .sort({ createdAt: -1 }); // Latest first
+    // SINGLE AGGREGATION FOR EVENTS & STORAGE
+    const eventStats = await EnterpriseClientEvent.aggregate([
+      {
+        $facet: {
+          counts: [
+            { $match: { deletedAt: null } },
+            {
+              $group: {
+                _id: null,
+                total: { $sum: 1 },
+                active: {
+                  $sum: {
+                    $cond: [{ $eq: ["$status", EventStatus.ACTIVE] }, 1, 0],
+                  },
+                },
+                totalMB: { $sum: "$totalMBUsed" },
+                totalPhotos: { $sum: "$totalPhotos" },
+              },
+            },
+          ],
+        },
+      },
+    ]);
 
-    // Group by action type
-    const actionBreakdown = {
-      trial: paymentHistory.filter((p) =>
-        [
-          SubscriptionAction.TRIAL_STARTED,
-          SubscriptionAction.TRIAL_EXPIRED,
-        ].includes(p.action),
-      ).length,
+    // SINGLE AGGREGATION FOR PACKAGES
+    const packageStats = await EnterpriseClientPackage.aggregate([
+      {
+        $facet: {
+          counts: [
+            {
+              $group: {
+                _id: null,
+                active: {
+                  $sum: { $cond: [{ $eq: ["$isActive", true] }, 1, 0] },
+                },
+                trial: {
+                  $sum: {
+                    $cond: [
+                      {
+                        $and: [
+                          { $eq: ["$isTrial", true] },
+                          { $eq: ["$isActive", true] },
+                        ],
+                      },
+                      1,
+                      0,
+                    ],
+                  },
+                },
+              },
+            },
+          ],
+        },
+      },
+    ]);
 
-      purchase: paymentHistory.filter(
-        (p) => p.action === SubscriptionAction.SUBSCRIPTION_STARTED,
-      ).length,
+    // ✅ ENHANCED REVENUE & PROFIT AGGREGATION BY CURRENCY
+    const revenueStats = await EnterprisePackageHistory.aggregate([
+      {
+        $match: {
+          "paymentDetails.paymentStatus": PaymentStatus.COMPLETED,
+        },
+      },
+      {
+        $facet: {
+          // INR Statistics
+          INR: [
+            {
+              $match: { "paymentDetails.currency": "INR" },
+            },
+            {
+              $group: {
+                _id: null,
+                totalRevenue: { $sum: "$paymentDetails.amountPaid" },
+                totalOriginalAmount: {
+                  $sum: "$paymentDetails.packageOriginalPrice",
+                },
+                totalDiscounts: {
+                  $sum: "$paymentDetails.packageDiscountAmount",
+                },
+                totalCreditApplied: {
+                  $sum: "$paymentDetails.proratedCreditApplied",
+                },
+                totalCreditLost: { $sum: "$paymentDetails.proratedCreditLost" },
+                totalRazorpayFees: {
+                  $sum: { $divide: ["$paymentDetails.fee", 100] },
+                },
+                totalRazorpayTax: {
+                  $sum: { $divide: ["$paymentDetails.tax", 100] },
+                },
+                transactionCount: { $sum: 1 },
+              },
+            },
+          ],
 
-      upgrade: paymentHistory.filter((p) =>
-        [
-          SubscriptionAction.UPGRADE_INITIATED,
-          SubscriptionAction.TRIAL_UPGRADED,
-          SubscriptionAction.SUBSCRIPTION_CHANGED,
-        ].includes(p.action),
-      ).length,
+          // USD Statistics
+          USD: [
+            {
+              $match: { "paymentDetails.currency": "USD" },
+            },
+            {
+              $group: {
+                _id: null,
+                totalRevenue: { $sum: "$paymentDetails.amountPaid" },
+                totalOriginalAmount: {
+                  $sum: "$paymentDetails.packageOriginalPrice",
+                },
+                totalDiscounts: {
+                  $sum: "$paymentDetails.packageDiscountAmount",
+                },
+                totalCreditApplied: {
+                  $sum: "$paymentDetails.proratedCreditApplied",
+                },
+                totalCreditLost: { $sum: "$paymentDetails.proratedCreditLost" },
+                totalRazorpayFees: {
+                  $sum: { $divide: ["$paymentDetails.fee", 100] },
+                },
+                totalRazorpayTax: {
+                  $sum: { $divide: ["$paymentDetails.tax", 100] },
+                },
+                transactionCount: { $sum: 1 },
+              },
+            },
+          ],
 
-      renewal: paymentHistory.filter((p) =>
-        [
-          SubscriptionAction.RENEWAL_INITIATED,
-          SubscriptionAction.SUBSCRIPTION_RENEWED,
-        ].includes(p.action),
-      ).length,
+          // Combined totals
+          totals: [
+            {
+              $group: {
+                _id: null,
+                totalTransactions: { $sum: 1 },
+                totalRevenueAllCurrencies: {
+                  $sum: "$paymentDetails.amountPaid",
+                },
+              },
+            },
+          ],
+        },
+      },
+    ]);
 
-      expired: paymentHistory.filter((p) =>
-        [
-          SubscriptionAction.SUBSCRIPTION_EXPIRED,
-          SubscriptionAction.TRIAL_EXPIRED,
-        ].includes(p.action),
-      ).length,
+    const clients = clientStats[0].counts[0] || {
+      total: 0,
+      active: 0,
+      verified: 0,
+      online: 0,
+    };
+    const events = eventStats[0].counts[0] || {
+      total: 0,
+      active: 0,
+      totalMB: 0,
+      totalPhotos: 0,
+    };
+    const packages = packageStats[0].counts[0] || {
+      active: 0,
+      trial: 0,
     };
 
-    // Group by year and month for timeline
-    const timelineData = paymentHistory.reduce((acc, payment) => {
-      const date = new Date(payment.createdAt);
-      const year = date.getFullYear();
-      const month = date.toLocaleString("default", { month: "long" });
-      const key = `${year}-${month}`;
+    // Extract revenue data with defaults
+    const inrData = revenueStats[0].INR[0] || {
+      totalRevenue: 0,
+      totalOriginalAmount: 0,
+      totalDiscounts: 0,
+      totalCreditApplied: 0,
+      totalCreditLost: 0,
+      totalRazorpayFees: 0,
+      totalRazorpayTax: 0,
+      transactionCount: 0,
+    };
 
-      if (!acc[key]) {
-        acc[key] = {
-          year,
-          month,
-          payments: [],
-        };
-      }
-      acc[key].payments.push(payment);
-      return acc;
-    }, {});
+    const usdData = revenueStats[0].USD[0] || {
+      totalRevenue: 0,
+      totalOriginalAmount: 0,
+      totalDiscounts: 0,
+      totalCreditApplied: 0,
+      totalCreditLost: 0,
+      totalRazorpayFees: 0,
+      totalRazorpayTax: 0,
+      transactionCount: 0,
+    };
+
+    const totals = revenueStats[0].totals[0] || {
+      totalTransactions: 0,
+      totalRevenueAllCurrencies: 0,
+    };
 
     return await jsonOne(res, HTTP.SUCCESS, {
-      actionBreakdown,
-      timeline: Object.values(timelineData),
-      totalRecords: paymentHistory.length,
+      clients: {
+        total: clients.total,
+        active: clients.active,
+        verified: clients.verified,
+        online: clients.online,
+      },
+      events: { total: events.total, active: events.active },
+      packages: { active: packages.active, trial: packages.trial },
+      storage: {
+        totalGB: (events.totalMB / 1024).toFixed(2),
+        totalPhotos: events.totalPhotos,
+      },
+      revenue: {
+        // INR Breakdown
+        INR: {
+          totalRevenue: inrData.totalRevenue,
+          totalOriginalAmount: inrData.totalOriginalAmount,
+          totalDiscounts: inrData.totalDiscounts,
+          totalCreditApplied: inrData.totalCreditApplied,
+          totalCreditLost: inrData.totalCreditLost,
+          totalRazorpayFees: inrData.totalRazorpayFees,
+          totalRazorpayTax: inrData.totalRazorpayTax,
+          transactionCount: inrData.transactionCount,
+          symbol: "₹",
+        },
+        // USD Breakdown
+        USD: {
+          totalRevenue: usdData.totalRevenue,
+          totalOriginalAmount: usdData.totalOriginalAmount,
+          totalDiscounts: usdData.totalDiscounts,
+          totalCreditApplied: usdData.totalCreditApplied,
+          totalCreditLost: usdData.totalCreditLost,
+          totalRazorpayFees: usdData.totalRazorpayFees,
+          totalRazorpayTax: usdData.totalRazorpayTax,
+          transactionCount: usdData.transactionCount,
+          symbol: "$",
+        },
+        // Combined Summary
+        totalTransactions: totals.totalTransactions,
+      },
     });
   } catch (error) {
     next(error);
   }
+};
+
+// ============================================
+// 2. REVENUE CHART - WITH INR & USD SEPARATION
+// ============================================
+const getDashboardRevenueChart = async (req, res, next) => {
+  try {
+    const {
+      period = "month",
+      startDate: customStart,
+      endDate: customEnd,
+    } = req.query;
+    const { startDate, endDate, compareStartDate, compareEndDate } =
+      getDateRange(period, customStart, customEnd);
+
+    const data = await EnterprisePackageHistory.aggregate([
+      {
+        $facet: {
+          // Current Period - INR
+          currentINR: [
+            {
+              $match: {
+                "paymentDetails.paymentStatus": PaymentStatus.COMPLETED,
+                "paymentDetails.currency": "INR",
+                "paymentDetails.paymentDate": {
+                  $gte: startDate,
+                  $lte: endDate,
+                },
+              },
+            },
+            {
+              $group: {
+                _id: {
+                  $dateToString: {
+                    format: "%Y-%m-%d",
+                    date: "$paymentDetails.paymentDate",
+                  },
+                },
+                revenue: { $sum: "$paymentDetails.amountPaid" },
+                count: { $sum: 1 },
+              },
+            },
+            { $sort: { _id: 1 } },
+          ],
+
+          // Current Period - USD
+          currentUSD: [
+            {
+              $match: {
+                "paymentDetails.paymentStatus": PaymentStatus.COMPLETED,
+                "paymentDetails.currency": "USD",
+                "paymentDetails.paymentDate": {
+                  $gte: startDate,
+                  $lte: endDate,
+                },
+              },
+            },
+            {
+              $group: {
+                _id: {
+                  $dateToString: {
+                    format: "%Y-%m-%d",
+                    date: "$paymentDetails.paymentDate",
+                  },
+                },
+                revenue: { $sum: "$paymentDetails.amountPaid" },
+                count: { $sum: 1 },
+              },
+            },
+            { $sort: { _id: 1 } },
+          ],
+
+          // Compare Period - INR
+          compareINR: [
+            {
+              $match: {
+                "paymentDetails.paymentStatus": PaymentStatus.COMPLETED,
+                "paymentDetails.currency": "INR",
+                "paymentDetails.paymentDate": {
+                  $gte: compareStartDate,
+                  $lte: compareEndDate,
+                },
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                revenue: { $sum: "$paymentDetails.amountPaid" },
+              },
+            },
+          ],
+
+          // Compare Period - USD
+          compareUSD: [
+            {
+              $match: {
+                "paymentDetails.paymentStatus": PaymentStatus.COMPLETED,
+                "paymentDetails.currency": "USD",
+                "paymentDetails.paymentDate": {
+                  $gte: compareStartDate,
+                  $lte: compareEndDate,
+                },
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                revenue: { $sum: "$paymentDetails.amountPaid" },
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    // Extract data
+    const currentINRData = data[0].currentINR;
+    const currentUSDData = data[0].currentUSD;
+
+    // Calculate totals
+    const currentINRTotal = currentINRData.reduce(
+      (sum, item) => sum + item.revenue,
+      0
+    );
+    const currentUSDTotal = currentUSDData.reduce(
+      (sum, item) => sum + item.revenue,
+      0
+    );
+
+    const compareINRTotal = data[0].compareINR[0]?.revenue || 0;
+    const compareUSDTotal = data[0].compareUSD[0]?.revenue || 0;
+
+    // Calculate percentage changes
+    const inrPercentChange =
+      compareINRTotal > 0
+        ? (
+            ((currentINRTotal - compareINRTotal) / compareINRTotal) *
+            100
+          ).toFixed(2)
+        : 0;
+
+    const usdPercentChange =
+      compareUSDTotal > 0
+        ? (
+            ((currentUSDTotal - compareUSDTotal) / compareUSDTotal) *
+            100
+          ).toFixed(2)
+        : 0;
+
+    // Get all unique dates from both currencies
+    const allDates = [
+      ...new Set([
+        ...currentINRData.map((item) => item._id),
+        ...currentUSDData.map((item) => item._id),
+      ]),
+    ].sort();
+
+    // Create aligned data for both currencies
+    const chartDataINR = allDates.map((date) => {
+      const dataPoint = currentINRData.find((item) => item._id === date);
+      return {
+        _id: date,
+        revenue: dataPoint?.revenue || 0,
+        count: dataPoint?.count || 0,
+      };
+    });
+
+    const chartDataUSD = allDates.map((date) => {
+      const dataPoint = currentUSDData.find((item) => item._id === date);
+      return {
+        _id: date,
+        revenue: dataPoint?.revenue || 0,
+        count: dataPoint?.count || 0,
+      };
+    });
+
+    return await jsonOne(res, HTTP.SUCCESS, {
+      chartData: allDates, // Common labels
+      INR: {
+        data: chartDataINR,
+        total: currentINRTotal,
+        previous: compareINRTotal,
+        percentChange: parseFloat(inrPercentChange),
+        isIncrease: inrPercentChange >= 0,
+        symbol: "₹",
+      },
+      USD: {
+        data: chartDataUSD,
+        total: currentUSDTotal,
+        previous: compareUSDTotal,
+        percentChange: parseFloat(usdPercentChange),
+        isIncrease: usdPercentChange >= 0,
+        symbol: "$",
+      },
+      summary: {
+        currentINR: currentINRTotal,
+        currentUSD: currentUSDTotal,
+        previousINR: compareINRTotal,
+        previousUSD: compareUSDTotal,
+      },
+      period: { startDate, endDate, compareStartDate, compareEndDate },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ============================================
+// 3. CLIENT GROWTH CHART - OPTIMIZED
+// ============================================
+const getDashboardClientGrowthChart = async (req, res, next) => {
+  try {
+    const {
+      period = "month",
+      startDate: customStart,
+      endDate: customEnd,
+    } = req.query;
+    const { startDate, endDate, compareStartDate, compareEndDate } =
+      getDateRange(period, customStart, customEnd);
+
+    const data = await EnterpriseClient.aggregate([
+      {
+        $facet: {
+          currentPeriod: [
+            {
+              $match: {
+                createdAt: { $gte: startDate, $lte: endDate },
+                deletedAt: null,
+              },
+            },
+            {
+              $group: {
+                _id: {
+                  $dateToString: { format: "%Y-%m-%d", date: "$createdAt" },
+                },
+                count: { $sum: 1 },
+              },
+            },
+            { $sort: { _id: 1 } },
+          ],
+          comparePeriod: [
+            {
+              $match: {
+                createdAt: { $gte: compareStartDate, $lte: compareEndDate },
+                deletedAt: null,
+              },
+            },
+            { $count: "count" },
+          ],
+        },
+      },
+    ]);
+
+    const currentData = data[0].currentPeriod;
+    const currentTotal = currentData.reduce((sum, item) => sum + item.count, 0);
+    const compareTotal = data[0].comparePeriod[0]?.count || 0;
+    const percentChange =
+      compareTotal > 0
+        ? (((currentTotal - compareTotal) / compareTotal) * 100).toFixed(2)
+        : 0;
+
+    return await jsonOne(res, HTTP.SUCCESS, {
+      chartData: currentData,
+      summary: {
+        current: currentTotal,
+        previous: compareTotal,
+        percentChange: parseFloat(percentChange),
+        isIncrease: percentChange >= 0,
+      },
+      period: { startDate, endDate, compareStartDate, compareEndDate },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ============================================
+// 4. EVENTS CHART - OPTIMIZED
+// ============================================
+const getDashboardEventsChart = async (req, res, next) => {
+  try {
+    const {
+      period = "month",
+      startDate: customStart,
+      endDate: customEnd,
+    } = req.query;
+    const { startDate, endDate, compareStartDate, compareEndDate } =
+      getDateRange(period, customStart, customEnd);
+
+    const data = await EnterpriseClientEvent.aggregate([
+      {
+        $facet: {
+          currentPeriod: [
+            {
+              $match: {
+                createdAt: { $gte: startDate, $lte: endDate },
+                deletedAt: null,
+              },
+            },
+            {
+              $group: {
+                _id: {
+                  $dateToString: { format: "%Y-%m-%d", date: "$createdAt" },
+                },
+                count: { $sum: 1 },
+              },
+            },
+            { $sort: { _id: 1 } },
+          ],
+          comparePeriod: [
+            {
+              $match: {
+                createdAt: { $gte: compareStartDate, $lte: compareEndDate },
+                deletedAt: null,
+              },
+            },
+            { $count: "count" },
+          ],
+        },
+      },
+    ]);
+
+    const currentData = data[0].currentPeriod;
+    const currentTotal = currentData.reduce((sum, item) => sum + item.count, 0);
+    const compareTotal = data[0].comparePeriod[0]?.count || 0;
+    const percentChange =
+      compareTotal > 0
+        ? (((currentTotal - compareTotal) / compareTotal) * 100).toFixed(2)
+        : 0;
+
+    return await jsonOne(res, HTTP.SUCCESS, {
+      chartData: currentData,
+      summary: {
+        current: currentTotal,
+        previous: compareTotal,
+        percentChange: parseFloat(percentChange),
+        isIncrease: percentChange >= 0,
+      },
+      period: { startDate, endDate, compareStartDate, compareEndDate },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ============================================
+// 5. STORAGE CHART - OPTIMIZED
+// ============================================
+const getDashboardStorageUsageChart = async (req, res, next) => {
+  try {
+    const {
+      period = "month",
+      startDate: customStart,
+      endDate: customEnd,
+    } = req.query;
+    const { startDate, endDate, compareStartDate, compareEndDate } =
+      getDateRange(period, customStart, customEnd);
+
+    const data = await EnterpriseClientEvent.aggregate([
+      {
+        $facet: {
+          currentPeriod: [
+            {
+              $match: {
+                createdAt: { $gte: startDate, $lte: endDate },
+                deletedAt: null,
+              },
+            },
+            {
+              $group: {
+                _id: {
+                  $dateToString: { format: "%Y-%m-%d", date: "$createdAt" },
+                },
+                totalMB: { $sum: "$totalMBUsed" },
+                totalPhotos: { $sum: "$totalPhotos" },
+              },
+            },
+            { $sort: { _id: 1 } },
+          ],
+          comparePeriod: [
+            {
+              $match: {
+                createdAt: { $gte: compareStartDate, $lte: compareEndDate },
+                deletedAt: null,
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                totalMB: { $sum: "$totalMBUsed" },
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    const currentData = data[0].currentPeriod;
+    const currentTotalMB = currentData.reduce(
+      (sum, item) => sum + item.totalMB,
+      0
+    );
+    const compareTotalMB = data[0].comparePeriod[0]?.totalMB || 0;
+    const percentChange =
+      compareTotalMB > 0
+        ? (((currentTotalMB - compareTotalMB) / compareTotalMB) * 100).toFixed(
+            2
+          )
+        : 0;
+
+    return await jsonOne(res, HTTP.SUCCESS, {
+      chartData: currentData,
+      summary: {
+        currentMB: currentTotalMB,
+        currentGB: (currentTotalMB / 1024).toFixed(2),
+        previousMB: compareTotalMB,
+        previousGB: (compareTotalMB / 1024).toFixed(2),
+        percentChange: parseFloat(percentChange),
+        isIncrease: percentChange >= 0,
+      },
+      period: { startDate, endDate, compareStartDate, compareEndDate },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ============================================
+// 6. TOP PACKAGES - ALREADY OPTIMIZED
+// ============================================
+const getDashboardTopPackages = async (req, res, next) => {
+  try {
+    const topPackages = await EnterprisePackageHistory.aggregate([
+      { $match: { "paymentDetails.paymentStatus": PaymentStatus.COMPLETED } },
+      {
+        $lookup: {
+          from: "enterprisepackages",
+          localField: "packageId",
+          foreignField: "_id",
+          as: "packageInfo",
+        },
+      },
+      { $unwind: "$packageInfo" },
+      {
+        $group: {
+          _id: "$packageId",
+          packageName: { $first: "$packageInfo.packageName" },
+          totalRevenue: { $sum: "$paymentDetails.amountPaid" },
+          subscriberCount: { $sum: 1 },
+        },
+      },
+      { $sort: { totalRevenue: -1 } },
+      { $limit: 5 },
+    ]);
+
+    return await jsonOne(res, HTTP.SUCCESS, topPackages);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ============================================
+// 7. TOP CLIENTS - ALREADY OPTIMIZED
+// ============================================
+const getDashboardTopClients = async (req, res, next) => {
+  try {
+    const topClients = await EnterpriseClientEvent.aggregate([
+      { $match: { deletedAt: null } },
+      {
+        $group: {
+          _id: "$enterpriseClientId",
+          totalMB: { $sum: "$totalMBUsed" },
+          totalEvents: { $sum: 1 },
+          totalPhotos: { $sum: "$totalPhotos" },
+        },
+      },
+      {
+        $lookup: {
+          from: "enterpriseclients",
+          localField: "_id",
+          foreignField: "_id",
+          as: "clientInfo",
+        },
+      },
+      { $unwind: "$clientInfo" },
+      {
+        $project: {
+          clientName: "$clientInfo.fullName",
+          clientEmail: "$clientInfo.email",
+          clientImage: "$clientInfo.image",
+          totalMB: 1,
+          totalGB: { $divide: ["$totalMB", 1024] },
+          totalEvents: 1,
+          totalPhotos: 1,
+        },
+      },
+      { $sort: { totalMB: -1 } },
+      { $limit: 10 },
+    ]);
+
+    return await jsonOne(res, HTTP.SUCCESS, topClients);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ============================================
+// 8. RECENT REGISTRATIONS - ALREADY OPTIMIZED
+// ============================================
+const getDashboardRecentRegistrations = async (req, res, next) => {
+  try {
+    const recentClients = await EnterpriseClient.find({
+      createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
+      deletedAt: null,
+    })
+      .select("fullName email image status verify createdAt")
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .lean();
+
+    return await jsonOne(res, HTTP.SUCCESS, recentClients);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export default {
+  getDashboardOverview,
+  getDashboardRevenueChart,
+  getDashboardClientGrowthChart,
+  getDashboardEventsChart,
+  getDashboardStorageUsageChart,
+  getDashboardTopPackages,
+  getDashboardTopClients,
+  getDashboardRecentRegistrations,
 };
