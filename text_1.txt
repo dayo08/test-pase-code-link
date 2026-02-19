@@ -1,415 +1,1234 @@
-import Link from "next/link";
-import React, { useMemo, useState } from "react";
+// src/app/admin/dashboard/page.jsx
+"use client";
 import {
-  FiFolder,
-  FiImage,
-  FiChevronLeft,
-  FiSettings,
-  FiShare2,
+  setClientCustom,
+  setClientPeriod,
+  setEventsCustom,
+  setEventsPeriod,
+  setRevenueCustom,
+  setRevenuePeriod,
+  setStorageCustom,
+  setStoragePeriod,
+} from "@/src/redux/features/dashboard/dashboardSlice";
+import {
+  fetchDashboardClientGrowthChart,
+  fetchDashboardEventsChart,
+  fetchDashboardOverview,
+  fetchDashboardRecentRegistrations,
+  fetchDashboardRevenueChart,
+  fetchDashboardStorageChart,
+  fetchDashboardTopClients,
+  fetchDashboardTopPackages,
+} from "@/src/redux/features/dashboard/dashboardThunks";
+import {
+  ArcElement,
+  BarElement,
+  CategoryScale,
+  Chart as ChartJS,
+  Filler,
+  Legend,
+  LinearScale,
+  LineElement,
+  PointElement,
+  Title,
+  Tooltip,
+} from "chart.js";
+import Image from "next/image";
+import { useCallback, useEffect } from "react";
+import { Bar, Line } from "react-chartjs-2";
+import {
+  FiActivity,
   FiCalendar,
-  FiClock,
-  FiMoreHorizontal,
-  FiX,
-  FiMapPin,
-  FiShield,
-  FiLayers,
+  FiDatabase,
+  FiDollarSign,
+  FiPackage,
+  FiRefreshCw,
+  FiTrendingDown,
+  FiTrendingUp,
+  FiUsers,
 } from "react-icons/fi";
+import { useDispatch, useSelector } from "react-redux";
 
-const InfoItem = ({ icon: Icon, label, value, highlight = false }) => (
-  <div
-    className={`flex items-center gap-1 px-2 py-1 rounded-lg ${
-      highlight ? "bg-secondary/10 border border-secondary/20" : "bg-gray-50"
-    }`}
-  >
-    <Icon className="text-secondary text-sm flex-shrink-0" />
-    <span
-      className={`text-xs font-medium truncate ${
-        highlight ? "text-primary" : "text-third"
-      }`}
-    >
-      {value}
-    </span>
-    <span className="text-xs text-gray-500 flex-shrink-0">{label}</span>
-  </div>
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  ArcElement,
+  Title,
+  Tooltip,
+  Legend,
+  Filler
 );
 
-const ActionButton = ({ icon: Icon, label, href }) => (
-  <Link
-    href={href}
-    passHref
-    className="bg-gradient-to-r from-secondary to-[#e8d4a6] text-primary px-2 py-1 rounded-lg font-medium hover:from-[#c9b085] hover:to-secondary transition-all flex items-center gap-1 shadow-sm hover:shadow-md text-xs"
-    aria-label={label}
-    title={label}
-  >
-    <Icon className="text-sm" />
-    <span className="inline">{label}</span>
-  </Link>
-);
+export default function AdminDashboard() {
+  const dispatch = useDispatch();
 
-const Header = ({
-  oneEvent,
-  sidebarVisible,
-  setSidebarVisible,
-  packageMB = 0,
-}) => {
-  const [showStatsModal, setShowStatsModal] = useState(false);
+  // Select data from Redux store
+  const {
+    overview,
+    revenueChart,
+    clientGrowthChart,
+    eventsChart,
+    storageChart,
+    topPackages,
+    topClients,
+    recentRegistrations,
+    revenuePeriod = "month",
+    clientPeriod = "month",
+    eventsPeriod = "month",
+    storagePeriod = "month",
+    revenueCustom,
+    clientCustom,
+    eventsCustom,
+    storageCustom,
+    overviewLoading,
+    revenueLoading,
+    clientLoading,
+    eventsLoading,
+    storageLoading,
+  } = useSelector((state) => state.dashboard);
 
-  const actions = useMemo(
-    () => [
-      {
-        icon: FiSettings,
-        label: "Settings",
-        value: "settings",
-        href: `/event/${oneEvent?._id}/settings`,
-      },
-      {
-        icon: FiShare2,
-        label: "Share",
-        value: "share",
-        href: `/common-qr?event_id=${oneEvent?._id}`,
-      },
-    ],
-    [oneEvent]
-  );
-
-  // Format dates properly
-  const formatEventDate = (dateString) => {
-    if (!dateString) return "N/A";
-    const date = new Date(dateString);
-    return date.toLocaleDateString("en-US", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
-  };
-
-  const stats = useMemo(
-    () => [
-      {
-        icon: FiFolder,
-        label: "Albums",
-        value: oneEvent?.totalAlbums || 0,
-        highlight: (oneEvent?.totalAlbums || 0) > 0,
-      },
-      {
-        icon: FiImage,
-        label: "Photos",
-        value: oneEvent?.totalPhotos || 0,
-        highlight: (oneEvent?.totalPhotos || 0) > 0,
-      },
-    ],
-    [oneEvent, packageMB]
-  );
-
-  const eventDetails = useMemo(
-    () => [
-      {
-        icon: FiCalendar,
-        label: "Start",
-        value: formatEventDate(oneEvent?.eventStartDate),
-      },
-      {
-        icon: FiClock,
-        label: "End",
-        value: formatEventDate(oneEvent?.eventEndDate),
-      },
-      {
-        icon: FiMapPin,
-        label: "Location",
-        value: oneEvent?.location || "N/A",
-      },
-      {
-        icon: FiShield,
-        label: "PIN",
-        value: oneEvent?.accessPin || "N/A",
-      },
-    ],
-    [oneEvent]
-  );
-
-  // Calculate storage percentage
-  const storagePercentage = useMemo(() => {
-    const used = oneEvent?.totalMBUsed || 0;
-    return Math.min((used / packageMB) * 100, 100);
-  }, [oneEvent?.totalMBUsed, packageMB]);
-
-  return (
-    <>
-      <header className="sticky top-0 z-20 bg-white/95 backdrop-blur-sm border-b border-gray-200/60 px-2 pb-2">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0 flex-1">
-            <button
-              onClick={() => setSidebarVisible(!sidebarVisible)}
-              className="xl:hidden flex items-center gap-2 flex-shrink-0 px-3 py-1.5 rounded-lg text-primary bg-gradient-to-r from-secondary/20 to-secondary/10 hover:from-secondary/30 hover:to-secondary/20 transition-all border border-secondary/30 hover:border-secondary/50"
-              aria-label={sidebarVisible ? "Hide sidebar" : "Show sidebar"}
-            >
-              <FiLayers className="text-base" />
-              <span className="text-sm font-medium">Albums</span>
-              <FiChevronLeft
-                className={`transition-transform duration-200 text-sm ${
-                  sidebarVisible ? "rotate-180" : ""
-                }`}
-              />
-            </button>
-            <div className="min-w-0 flex-1">
-              <h1 className="text-base font-semibold text-primary truncate">
-                {oneEvent?.eventName || "Event Name"}
-              </h1>
-              <p className="text-xs text-gray-500 line-clamp-1">
-                {oneEvent?.description || "No description available"}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setShowStatsModal(true)}
-              className="lg:hidden flex items-center gap-1 bg-gray-100 p-1.5 rounded-lg text-gray-700 hover:bg-secondary/10 hover:text-secondary transition-all"
-            >
-              <FiMoreHorizontal />
-              <span className="text-xs hidden sm:inline">Details</span>
-            </button>
-
-            <div className="hidden lg:flex gap-2">
-              {stats.map((item) => (
-                <InfoItem key={item.label} {...item} />
-              ))}
-            </div>
-
-            <div className="hidden sm:flex gap-1">
-              {actions.map((action) => (
-                <ActionButton key={action.value} {...action} />
-              ))}
-            </div>
-          </div>
-        </div>
-      </header>
-
-      {showStatsModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl w-full max-w-sm p-4 animate-in fade-in shadow-xl">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="font-semibold text-lg text-primary">
-                Event Details
-              </h3>
-              <button
-                onClick={() => setShowStatsModal(false)}
-                className="p-1 rounded-full hover:bg-gray-100 text-primary transition-colors"
-              >
-                <FiX />
-              </button>
-            </div>
-
-            {/* Event Info */}
-            <div className="mb-4">
-              <h4 className="text-sm font-medium text-primary mb-2">
-                Event Information
-              </h4>
-              <div className="grid gap-2">
-                {eventDetails.map((item) => (
-                  <div
-                    key={item.label}
-                    className="flex items-center gap-2 bg-gray-50 p-2 rounded-lg"
-                  >
-                    <item.icon className="text-secondary text-base flex-shrink-0" />
-                    <div className="min-w-0 flex-1">
-                      <span className="text-xs text-gray-500 block">
-                        {item.label}
-                      </span>
-                      <span className="text-sm font-medium text-gray-700 truncate block">
-                        {item.value}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Statistics */}
-            <div className="mb-4">
-              <h4 className="text-sm font-medium text-primary mb-2">
-                Statistics
-              </h4>
-              <div className="grid gap-2">
-                {stats.map((item) => (
-                  <div
-                    key={item.label}
-                    className="flex items-center gap-2 bg-gray-50 p-2 rounded-lg"
-                  >
-                    <item.icon className="text-secondary text-base flex-shrink-0" />
-                    <div className="min-w-0 flex-1">
-                      <span className="text-xs text-gray-500 block">
-                        {item.label}
-                      </span>
-                      <span className="text-sm font-medium text-gray-700 truncate block">
-                        {item.value}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Storage Progress Bar */}
-              <div className="mt-2 bg-gray-200 rounded-full h-2">
-                <div
-                  className="bg-gradient-to-r from-secondary to-[#e8d4a6] h-2 rounded-full transition-all duration-300"
-                  style={{ width: `${storagePercentage}%` }}
-                />
-              </div>
-              <p className="text-xs text-gray-500 mt-1">
-                {storagePercentage.toFixed(1)}% of package storage used
-              </p>
-            </div>
-
-            {/* Actions */}
-            <div className="grid grid-cols-2 gap-2">
-              {actions.map((action) => (
-                <ActionButton key={action.value} {...action} />
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-    </>
-  );
-};
-
-export default Header;
-
-
-
-
-
-import { cx } from "@/src/utils";
-import React, { useState, useCallback, useMemo } from "react";
-import { FiHardDrive, FiImage, FiUpload } from "react-icons/fi";
-
-const UploadButton = ({ label, icon, className, onChange }) => (
-  <label className={`w-full sm:w-auto ${className}`}>
-    {icon}
-    <span>{label}</span>
-    <input
-      type="file"
-      multiple
-      accept="image/*"
-      onChange={onChange}
-      className="hidden"
-    />
-  </label>
-);
-
-const UploadSection = ({ currentAlbum, handleFileChange, maxImageSize }) => {
-  const [isDragging, setIsDragging] = useState(false);
-
-  const handleDragEvent = useCallback((e) => {
-    e.preventDefault();
-    e.stopPropagation();
+  useEffect(() => {
+    dispatch(fetchDashboardOverview());
+    dispatch(fetchDashboardRevenueChart({ period: revenuePeriod }));
+    dispatch(fetchDashboardClientGrowthChart({ period: clientPeriod }));
+    dispatch(fetchDashboardEventsChart({ period: eventsPeriod }));
+    dispatch(fetchDashboardStorageChart({ period: storagePeriod }));
+    dispatch(fetchDashboardTopPackages());
+    dispatch(fetchDashboardTopClients());
+    dispatch(fetchDashboardRecentRegistrations());
   }, []);
 
-  const handleDragIn = useCallback(
-    (e) => {
-      handleDragEvent(e);
-      if (e.dataTransfer.items?.length) setIsDragging(true);
-    },
-    [handleDragEvent]
-  );
-
-  const handleDragOut = handleDragEvent;
-
-  const handleDrop = useCallback(
-    (e) => {
-      handleDragEvent(e);
-      setIsDragging(false);
-      if (e.dataTransfer.files?.length) {
-        handleFileChange({ target: { files: e.dataTransfer.files } });
+  const handlePeriodChange = useCallback(
+    (chart, period) => {
+      switch (chart) {
+        case "revenue":
+          dispatch(setRevenuePeriod(period));
+          dispatch(fetchDashboardRevenueChart({ period }));
+          break;
+        case "client":
+          dispatch(setClientPeriod(period));
+          dispatch(fetchDashboardClientGrowthChart({ period }));
+          break;
+        case "events":
+          dispatch(setEventsPeriod(period));
+          dispatch(fetchDashboardEventsChart({ period }));
+          break;
+        case "storage":
+          dispatch(setStoragePeriod(period));
+          dispatch(fetchDashboardStorageChart({ period }));
+          break;
       }
     },
-    [handleDragEvent, handleFileChange]
+    [dispatch]
   );
 
-  const uploadButtons = useMemo(
-    () => [
-      {
-        label: "Select",
-        icon: <FiImage className="text-sm" />,
-        className:
-          "bg-primary text-white px-3 py-2 rounded-lg cursor-pointer hover:bg-opacity-90 text-sm flex items-center justify-center gap-1.5 transition shadow-sm hover:shadow",
-      },
-      {
-        label: "Drop Files",
-        icon: <FiUpload className="text-sm" />,
-        className:
-          "bg-gradient-to-r from-secondary to-[#e8d4a6] text-primary px-3 py-2 rounded-lg cursor-pointer hover:from-[#c9b085] hover:to-secondary text-sm font-medium flex items-center justify-center gap-1.5 transition shadow-sm hover:shadow",
-      },
-    ],
-    []
+  const handleCustomApply = useCallback(
+    (chart, start, end) => {
+      switch (chart) {
+        case "revenue":
+          dispatch(setRevenueCustom({ start, end }));
+          dispatch(
+            fetchDashboardRevenueChart({
+              period: "custom",
+              startDate: start,
+              endDate: end,
+            })
+          );
+          break;
+        case "client":
+          dispatch(setClientCustom({ start, end }));
+          dispatch(
+            fetchDashboardClientGrowthChart({
+              period: "custom",
+              startDate: start,
+              endDate: end,
+            })
+          );
+          break;
+        case "events":
+          dispatch(setEventsCustom({ start, end }));
+          dispatch(
+            fetchDashboardEventsChart({
+              period: "custom",
+              startDate: start,
+              endDate: end,
+            })
+          );
+          break;
+        case "storage":
+          dispatch(setStorageCustom({ start, end }));
+          dispatch(
+            fetchDashboardStorageChart({
+              period: "custom",
+              startDate: start,
+              endDate: end,
+            })
+          );
+          break;
+      }
+    },
+    [dispatch]
   );
+
+  const handleFetchAll = () => {
+    dispatch(fetchDashboardOverview());
+    dispatch(
+      fetchDashboardRevenueChart({
+        period: revenuePeriod,
+        startDate: revenueCustom.start,
+        endDate: revenueCustom.end,
+      })
+    );
+    dispatch(
+      fetchDashboardClientGrowthChart({
+        period: clientPeriod,
+        startDate: clientCustom.start,
+        endDate: clientCustom.end,
+      })
+    );
+    dispatch(
+      fetchDashboardEventsChart({
+        period: eventsPeriod,
+        startDate: eventsCustom.start,
+        endDate: eventsCustom.end,
+      })
+    );
+    dispatch(
+      fetchDashboardStorageChart({
+        period: storagePeriod,
+        startDate: storageCustom.start,
+        endDate: storageCustom.end,
+      })
+    );
+    dispatch(fetchDashboardTopPackages());
+    dispatch(fetchDashboardTopClients());
+    dispatch(fetchDashboardRecentRegistrations());
+  };
+
+  if (overviewLoading) {
+    return <LoadingDashboard />;
+  }
+
+  if (!overview) {
+    return null;
+  }
+
+  const { clients, events, packages, storage, revenue } = overview;
 
   return (
-    <div className="relative bg-white rounded-lg shadow-sm transition-all mb-2">
-      {/* Album Header Section */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 px-3 py-1 border-t border-x border-gray-200 rounded-t">
+    <div className="h-full overflow-auto bg-gray-50 p-3 lg:p-6">
+      {/* Header */}
+      <div className="mb-6 flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-bold text-primary">
-            {currentAlbum.albumName}
-          </h2>
+          <h1 className="text-2xl lg:text-3xl font-bold text-[#343148] flex items-center gap-2">
+            <FiActivity className="text-[#D7C39D]" size={32} />
+            Analytics Dashboard
+          </h1>
+          <p className="text-sm text-gray-600 mt-1">
+            Real-time platform insights with exact financial metrics
+          </p>
         </div>
-        <div className="flex gap-3 text-xs text-gray-600">
-          <div className="flex items-center gap-1">
-            <FiImage className="text-secondary text-sm" />
-            {currentAlbum.totalImages || 0} photos
+        <button
+          onClick={handleFetchAll}
+          className="px-4 py-2 bg-[#343148] text-white rounded-lg text-sm font-medium hover:bg-[#2a2738] transition-all flex items-center gap-2"
+        >
+          <FiRefreshCw size={16} />
+          Refresh All
+        </button>
+      </div>
+
+      {/* Primary Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+        <StatCard
+          title="Total Clients"
+          value={clients.total}
+          icon={<FiUsers size={20} />}
+          gradient="from-blue-500 to-blue-600"
+          detail={`${clients.active} Active`}
+        />
+        <StatCard
+          title="INR Revenue"
+          value={`₹${formatExactAmount(revenue.INR.totalRevenue)}`}
+          icon={<FiDollarSign size={20} />}
+          gradient="from-green-500 to-green-600"
+          detail={`${revenue.INR.transactionCount} Transactions`}
+        />
+        <StatCard
+          title="USD Revenue"
+          value={`$${formatExactAmount(revenue.USD.totalRevenue)}`}
+          icon={<FiDollarSign size={20} />}
+          gradient="from-emerald-500 to-emerald-600"
+          detail={`${revenue.USD.transactionCount} Transactions`}
+        />
+        <StatCard
+          title="Storage Used"
+          value={`${storage.totalGB} GB`}
+          icon={<FiDatabase size={20} />}
+          gradient="from-orange-500 to-orange-600"
+          detail={`${formatNumber(storage.totalPhotos)} Photos`}
+        />
+      </div>
+
+      {/* Financial Breakdown - INR & USD */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
+        {/* INR Financial Breakdown */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-100">
+            <div className="p-2 bg-gradient-to-br from-green-500/10 to-green-600/10 rounded-xl">
+              <FiDollarSign className="text-green-600" size={24} />
+            </div>
+            <h3 className="text-xl font-bold text-[#343148]">
+              INR Financial Overview
+            </h3>
           </div>
-          <div className="flex items-center gap-1">
-            <FiHardDrive className="text-secondary text-sm" />
-            {currentAlbum?.totalMBUsed.toFixed(2)} MB
+
+          <div className="grid grid-cols-2 gap-4">
+            <FinancialMetric
+              label="Total Revenue"
+              value={`₹${formatExactAmount(revenue.INR.totalRevenue)}`}
+              color="green"
+            />
+            <FinancialMetric
+              label="Original Amount"
+              value={`₹${formatExactAmount(revenue.INR.totalOriginalAmount)}`}
+              color="gray"
+            />
+            <FinancialMetric
+              label="Discounts Given"
+              value={`₹${formatExactAmount(revenue.INR.totalDiscounts)}`}
+              color="orange"
+            />
+            <FinancialMetric
+              label="Credit Applied"
+              value={`₹${formatExactAmount(revenue.INR.totalCreditApplied)}`}
+              color="blue"
+            />
+            <FinancialMetric
+              label="Profit (Credit Lost)"
+              value={`₹${formatExactAmount(revenue.INR.totalCreditLost)}`}
+              color="purple"
+              highlight
+            />
+            <FinancialMetric
+              label="Razorpay Fees"
+              value={`₹${formatExactAmount(revenue.INR.totalRazorpayFees)}`}
+              color="red"
+              subtitle={`GST: ₹${formatExactAmount(
+                revenue.INR.totalRazorpayTax
+              )}`}
+            />
+          </div>
+        </div>
+
+        {/* USD Financial Breakdown */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-100">
+            <div className="p-2 bg-gradient-to-br from-emerald-500/10 to-emerald-600/10 rounded-xl">
+              <FiDollarSign className="text-emerald-600" size={24} />
+            </div>
+            <h3 className="text-xl font-bold text-[#343148]">
+              USD Financial Overview
+            </h3>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <FinancialMetric
+              label="Total Revenue"
+              value={`$${formatExactAmount(revenue.USD.totalRevenue)}`}
+              color="green"
+            />
+            <FinancialMetric
+              label="Original Amount"
+              value={`$${formatExactAmount(revenue.USD.totalOriginalAmount)}`}
+              color="gray"
+            />
+            <FinancialMetric
+              label="Discounts Given"
+              value={`$${formatExactAmount(revenue.USD.totalDiscounts)}`}
+              color="orange"
+            />
+            <FinancialMetric
+              label="Credit Applied"
+              value={`$${formatExactAmount(revenue.USD.totalCreditApplied)}`}
+              color="blue"
+            />
+            <FinancialMetric
+              label="Profit (Credit Lost)"
+              value={`$${formatExactAmount(revenue.USD.totalCreditLost)}`}
+              color="purple"
+              highlight
+            />
+            <FinancialMetric
+              label="Razorpay Fees (INR)"
+              value={`₹${formatExactAmount(revenue.USD.totalRazorpayFees)}`}
+              color="red"
+              subtitle={`GST: ₹${formatExactAmount(
+                revenue.USD.totalRazorpayTax
+              )}`}
+            />
           </div>
         </div>
       </div>
 
-      <div
-        onDragEnter={handleDragIn}
-        onDragLeave={handleDragOut}
-        onDragOver={handleDragEvent}
-        onDrop={handleDrop}
-        className={cx(
-          "p-3 border-2 border-dashed rounded-b-lg relative",
-          isDragging
-            ? "border-secondary bg-[#fff9e6]"
-            : "border-gray-200 hover:border-secondary"
-        )}
-      >
-        {/* Upload Section */}
-        <div className="mb-2 flex justify-center  items-center gap-2 w-full sm:w-auto">
-          {uploadButtons.map((btn, idx) => (
-            <UploadButton key={idx} {...btn} onChange={handleFileChange} />
-          ))}
-        </div>
+      {/* Mini Stats */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+        <MiniStat label="Online" value={clients.online} color="green" />
+        <MiniStat label="Verified" value={clients.verified} color="blue" />
+        <MiniStat
+          label="Active Packages"
+          value={packages.active}
+          color="purple"
+        />
+        <MiniStat label="Trial" value={packages.trial} color="orange" />
+        <MiniStat label="Active Events" value={events.active} color="indigo" />
+        <MiniStat
+          label="Total Transactions"
+          value={revenue.totalTransactions}
+          color="gray"
+        />
+      </div>
 
-        {isDragging && (
-          <div className="absolute inset-0 bg-secondary/10 backdrop-blur-[2px] rounded-lg flex items-center justify-center">
-            <div className="text-center p-3">
-              <FiUpload size={20} className="mx-auto mb-1 text-primary" />
-              <p className="text-primary font-medium text-sm">
-                Drop files here
+      {/* Charts Section */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
+        {/* Revenue Chart */}
+        <RevenueChartDual
+          title="Revenue Analytics (INR & USD)"
+          icon={<FiDollarSign />}
+          period={revenuePeriod}
+          onPeriodChange={(period) => handlePeriodChange("revenue", period)}
+          customDates={revenueCustom}
+          onCustomApply={(start, end) =>
+            handleCustomApply("revenue", start, end)
+          }
+          data={revenueChart}
+          loading={revenueLoading}
+        />
+
+        {/* Client Growth Chart */}
+        <AnalyticsChart
+          title="Client Growth"
+          icon={<FiUsers />}
+          period={clientPeriod}
+          onPeriodChange={(period) => handlePeriodChange("client", period)}
+          customDates={clientCustom}
+          onCustomApply={(start, end) =>
+            handleCustomApply("client", start, end)
+          }
+          data={clientGrowthChart}
+          loading={clientLoading}
+          type="line"
+          color="#343148"
+        />
+
+        {/* Events Chart */}
+        <AnalyticsChart
+          title="Events Created"
+          icon={<FiCalendar />}
+          period={eventsPeriod}
+          onPeriodChange={(period) => handlePeriodChange("events", period)}
+          customDates={eventsCustom}
+          onCustomApply={(start, end) =>
+            handleCustomApply("events", start, end)
+          }
+          data={eventsChart}
+          loading={eventsLoading}
+          type="bar"
+          color="#D7C39D"
+        />
+
+        {/* Storage Chart */}
+        <AnalyticsChart
+          title="Storage Usage (MB)"
+          icon={<FiDatabase />}
+          period={storagePeriod}
+          onPeriodChange={(period) => handlePeriodChange("storage", period)}
+          customDates={storageCustom}
+          onCustomApply={(start, end) =>
+            handleCustomApply("storage", start, end)
+          }
+          data={storageChart}
+          loading={storageLoading}
+          type="line"
+          color="#f59e0b"
+          valueSuffix=" MB"
+        />
+      </div>
+
+      {/* Tables Section */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
+        {/* Top Clients by Storage */}
+        <TableCard title="Top Clients by Storage" icon={<FiDatabase />}>
+          <div className="space-y-2">
+            {topClients.map((client, idx) => (
+              <div
+                key={idx}
+                className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 transition-colors border border-gray-100"
+              >
+                <div className="relative w-10 h-10 rounded-full overflow-hidden flex-shrink-0 border-2 border-gray-200">
+                  {client.clientImage ? (
+                    <Image
+                      src={client.clientImage}
+                      alt={client.clientName}
+                      fill
+                      className="object-cover"
+                      sizes="40px"
+                    />
+                  ) : (
+                    <div className="w-full h-full bg-gradient-to-br from-[#343148] to-[#D7C39D] flex items-center justify-center">
+                      <span className="text-white text-sm font-bold">
+                        {client.clientName.charAt(0)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 truncate">
+                    {client.clientName}
+                  </p>
+                  <p className="text-xs text-gray-500 truncate">
+                    {client.clientEmail}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm font-bold text-[#343148]">
+                    {client.totalGB.toFixed(2)} GB
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    {formatNumber(client.totalPhotos)} photos
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </TableCard>
+
+        {/* Recent Registrations */}
+        <TableCard title="Recent Registrations" icon={<FiUsers />}>
+          <div className="space-y-2">
+            {recentRegistrations.map((client, idx) => (
+              <div
+                key={idx}
+                className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 transition-colors border border-gray-100"
+              >
+                <div className="relative w-10 h-10 rounded-full overflow-hidden flex-shrink-0 border-2 border-gray-200">
+                  {client.image ? (
+                    <Image
+                      src={client.image}
+                      alt={client.fullName}
+                      fill
+                      className="object-cover"
+                      sizes="40px"
+                    />
+                  ) : (
+                    <div className="w-full h-full bg-gradient-to-br from-[#343148] to-[#D7C39D] flex items-center justify-center">
+                      <span className="text-white text-sm font-bold">
+                        {client.fullName.charAt(0)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 truncate">
+                    {client.fullName}
+                  </p>
+                  <p className="text-xs text-gray-500 truncate">
+                    {client.email}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs text-gray-500">
+                    {formatDate(client.createdAt)}
+                  </p>
+                  <StatusBadge status={client.status} verify={client.verify} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </TableCard>
+      </div>
+
+      {/* Top Packages */}
+      <TableCard title="Top Packages" icon={<FiPackage />} fullWidth>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b-2 border-gray-200 bg-gray-50">
+                <th className="text-left py-3 px-4 text-xs font-bold text-gray-700 uppercase">
+                  Package
+                </th>
+                <th className="text-right py-3 px-4 text-xs font-bold text-gray-700 uppercase">
+                  Revenue
+                </th>
+                <th className="text-center py-3 px-4 text-xs font-bold text-gray-700 uppercase">
+                  Subscribers
+                </th>
+                <th className="text-right py-3 px-4 text-xs font-bold text-gray-700 uppercase">
+                  Avg/Sale
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {topPackages.map((pkg, idx) => (
+                <tr
+                  key={idx}
+                  className="border-b border-gray-100 hover:bg-gray-50"
+                >
+                  <td className="py-3 px-4 font-semibold text-gray-900">
+                    {pkg.packageName}
+                  </td>
+                  <td className="py-3 px-4 text-right font-bold text-green-600">
+                    ₹{formatExactAmount(pkg.totalRevenue)}
+                  </td>
+                  <td className="py-3 px-4 text-center">
+                    <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-semibold">
+                      {pkg.subscriberCount}
+                    </span>
+                  </td>
+                  <td className="py-3 px-4 text-right font-semibold text-gray-900">
+                    ₹{formatExactAmount(pkg.totalRevenue / pkg.subscriberCount)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </TableCard>
+    </div>
+  );
+}
+
+// ============ COMPONENTS ============
+
+const StatCard = ({ title, value, icon, gradient, detail }) => (
+  <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 hover:shadow-md transition-all">
+    <div className="flex items-start justify-between mb-3">
+      <div
+        className={`w-12 h-12 rounded-lg bg-gradient-to-br ${gradient} flex items-center justify-center text-white shadow-lg`}
+      >
+        {icon}
+      </div>
+    </div>
+    <h3 className="text-xs font-medium text-gray-600 mb-1 uppercase tracking-wide">
+      {title}
+    </h3>
+    <p className="text-2xl lg:text-3xl font-bold text-[#343148] mb-1">
+      {value}
+    </p>
+    <p className="text-xs text-gray-500 font-medium">{detail}</p>
+  </div>
+);
+
+const FinancialMetric = ({
+  label,
+  value,
+  color,
+  subtitle,
+  highlight = false,
+}) => {
+  const colors = {
+    green: "bg-green-50 text-green-700 border-green-200",
+    gray: "bg-gray-50 text-gray-700 border-gray-200",
+    orange: "bg-orange-50 text-orange-700 border-orange-200",
+    blue: "bg-blue-50 text-blue-700 border-blue-200",
+    purple: "bg-purple-50 text-purple-700 border-purple-200",
+    red: "bg-red-50 text-red-700 border-red-200",
+  };
+
+  return (
+    <div
+      className={`p-4 rounded-lg border-2 ${colors[color]} ${
+        highlight ? "ring-2 ring-purple-400 shadow-lg" : ""
+      }`}
+    >
+      <p className="text-xs font-medium opacity-80 uppercase tracking-wide mb-2">
+        {label}
+      </p>
+      <p className={`text-xl font-black ${highlight ? "text-2xl" : ""}`}>
+        {value}
+      </p>
+      {subtitle && <p className="text-xs mt-1 opacity-70">{subtitle}</p>}
+    </div>
+  );
+};
+
+const MiniStat = ({ label, value, color }) => {
+  const colors = {
+    green: "bg-green-100 text-green-700 border-green-200",
+    blue: "bg-blue-100 text-blue-700 border-blue-200",
+    purple: "bg-purple-100 text-purple-700 border-purple-200",
+    orange: "bg-orange-100 text-orange-700 border-orange-200",
+    indigo: "bg-indigo-100 text-indigo-700 border-indigo-200",
+    gray: "bg-gray-100 text-gray-700 border-gray-200",
+  };
+
+  return (
+    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-3 hover:shadow-md transition-all">
+      <p className="text-xs text-gray-600 font-medium mb-1">{label}</p>
+      <p
+        className={`text-lg font-bold px-3 py-2 rounded-lg border ${colors[color]}`}
+      >
+        {value}
+      </p>
+    </div>
+  );
+};
+
+const AnalyticsChart = ({
+  title,
+  icon,
+  period,
+  onPeriodChange,
+  customDates,
+  onCustomApply,
+  data,
+  loading = false,
+  type = "line",
+  color,
+  valuePrefix = "",
+  valueSuffix = "",
+  useExactFormat = false,
+}) => {
+  const showCustomInputs = period === "custom";
+
+  const chartData = {
+    labels: data?.chartData?.map((item) => item._id) || [],
+    datasets: [
+      {
+        label: title,
+        data:
+          data?.chartData?.map((item) =>
+            type === "line" && item.revenue
+              ? item.revenue
+              : item.count || item.totalMB || 0
+          ) || [],
+        borderColor: color,
+        backgroundColor: type === "bar" ? `${color}20` : `${color}15`,
+        fill: type === "line",
+        tension: 0.4,
+        ...(type === "line" && {
+          pointRadius: 4,
+          pointHoverRadius: 6,
+          pointBackgroundColor: color,
+          pointBorderColor: "#fff",
+          pointBorderWidth: 2,
+        }),
+        ...(type === "bar" && {
+          borderRadius: 8,
+          borderSkipped: false,
+        }),
+      },
+    ],
+  };
+
+  const options = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: "rgba(52, 49, 72, 0.95)",
+        padding: 12,
+        cornerRadius: 8,
+        callbacks: {
+          label: (context) =>
+            useExactFormat
+              ? `${valuePrefix}${formatExactAmount(
+                  context.parsed.y
+                )}${valueSuffix}`
+              : `${valuePrefix}${formatNumber(context.parsed.y)}${valueSuffix}`,
+        },
+      },
+    },
+    scales: {
+      y: {
+        beginAtZero: true,
+        grid: { color: "rgba(0,0,0,0.05)" },
+        ticks: {
+          color: "#6b7280",
+          callback: (value) =>
+            useExactFormat ? formatExactAmount(value) : formatNumber(value),
+        },
+      },
+      x: {
+        grid: { display: false },
+        ticks: { color: "#6b7280", maxRotation: 45 },
+      },
+    },
+    animation: {
+      duration: 1000,
+      easing: "easeOutQuart",
+    },
+  };
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 h-full">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-100">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-gradient-to-br from-[#343148]/10 to-[#D7C39D]/10 rounded-xl">
+            {icon}
+          </div>
+          <h3 className="text-lg font-bold text-[#343148]">{title}</h3>
+        </div>
+        <select
+          value={period}
+          onChange={(e) => onPeriodChange(e.target.value)}
+          disabled={loading}
+          className="px-3 py-2 border border-gray-300 rounded-lg text-sm font-medium bg-white focus:outline-none focus:ring-2 focus:ring-[#D7C39D]/50 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <option value="today">Today</option>
+          <option value="yesterday">Yesterday</option>
+          <option value="week">Last 7 Days</option>
+          <option value="month">This Month</option>
+          <option value="lastMonth">Last Month</option>
+          <option value="year">This Year</option>
+          <option value="custom">Custom Range</option>
+        </select>
+      </div>
+
+      {/* Custom Date Inputs */}
+      {showCustomInputs && (
+        <div className="flex gap-2 mb-4 p-3 bg-gray-50 rounded-lg border">
+          <input
+            type="date"
+            value={customDates?.start || ""}
+            onChange={(e) =>
+              onCustomApply(e.target.value, customDates?.end || "")
+            }
+            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D7C39D]/50"
+          />
+          <input
+            type="date"
+            value={customDates?.end || ""}
+            onChange={(e) =>
+              onCustomApply(customDates?.start || "", e.target.value)
+            }
+            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D7C39D]/50"
+          />
+        </div>
+      )}
+
+      {/* Comparison Summary */}
+      {data?.summary && (
+        <div className="mb-6 p-4 bg-gradient-to-r from-green-50 to-blue-50 rounded-xl border border-green-100">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs text-gray-600 font-medium uppercase tracking-wide">
+                Current Period
+              </p>
+              <p className="text-2xl font-bold text-[#343148] mt-1">
+                {valuePrefix}
+                {useExactFormat
+                  ? formatExactAmount(
+                      data.summary.current || data.summary.currentMB || 0
+                    )
+                  : formatNumber(
+                      data.summary.current || data.summary.currentMB || 0
+                    )}
+                {valueSuffix}
               </p>
             </div>
+            <div className="text-right">
+              <p className="text-xs text-gray-600 font-medium uppercase tracking-wide">
+                vs Previous
+              </p>
+              <div
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold mt-1 ${
+                  data.summary.isIncrease
+                    ? "bg-green-100 text-green-800"
+                    : "bg-red-100 text-red-800"
+                }`}
+              >
+                {data.summary.isIncrease ? (
+                  <FiTrendingUp size={18} />
+                ) : (
+                  <FiTrendingDown size={18} />
+                )}
+                {Math.abs(data.summary.percentChange).toFixed(1)}%
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Chart Container */}
+      <div className="h-72 relative">
+        {loading ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-white/80 backdrop-blur-sm rounded-xl">
+            <div className="w-8 h-8 border-2 border-[#D7C39D]/50 border-t-[#343148] rounded-full animate-spin" />
+          </div>
+        ) : data?.chartData?.length > 0 ? (
+          type === "line" ? (
+            <Line data={chartData} options={options} />
+          ) : (
+            <Bar data={chartData} options={options} />
+          )
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center text-gray-400 text-sm">
+            No data available for selected period
           </div>
         )}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-1 text-xs text-gray-500">
-          <p>JPG, PNG, JPEG supported</p>
-          <p className="text-red-500 font-medium">
-            *Select files or drag and drop. You can upload up to 1000 images at
-            once.*
-          </p>
-          <p>Max: {maxImageSize}MB per image</p>
-        </div>
       </div>
     </div>
   );
 };
 
-export default UploadSection;
+const TableCard = ({ title, icon, children, fullWidth = false }) => (
+  <div
+    className={`bg-white rounded-xl shadow-sm border border-gray-200 p-6 ${
+      fullWidth ? "xl:col-span-full" : ""
+    }`}
+  >
+    <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-100">
+      <div className="p-2 bg-gradient-to-br from-[#343148]/10 to-[#D7C39D]/10 rounded-xl">
+        {icon}
+      </div>
+      <h3 className="text-xl font-bold text-[#343148]">{title}</h3>
+    </div>
+    {children}
+  </div>
+);
 
+const StatusBadge = ({ status, verify }) => (
+  <div className="flex items-center gap-1.5 mt-1">
+    <span
+      className={`px-2.5 py-1 rounded-full text-xs font-bold ${
+        status === "activate" || status === "active"
+          ? "bg-green-100 text-green-800 border border-green-200"
+          : "bg-red-100 text-red-800 border border-red-200"
+      }`}
+    >
+      {status?.toUpperCase()}
+    </span>
+    {verify === "verified" && (
+      <div className="w-3 h-3 bg-green-500 rounded-full border-2 border-white shadow-sm" />
+    )}
+  </div>
+);
 
+const LoadingDashboard = () => (
+  <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center p-8">
+    <div className="text-center max-w-md mx-auto">
+      <div className="w-24 h-24 border-4 border-[#D7C39D]/20 border-t-[#343148] rounded-2xl animate-spin mx-auto mb-6 shadow-xl" />
+      <h2 className="text-2xl font-bold text-[#343148] mb-2">
+        Loading Analytics...
+      </h2>
+      <p className="text-gray-600">Fetching real-time platform insights</p>
+      <div className="flex justify-center gap-2 mt-6">
+        <div className="w-2 h-2 bg-[#343148]/30 rounded-full animate-bounce" />
+        <div
+          className="w-2 h-2 bg-[#D7C39D]/50 rounded-full animate-bounce"
+          style={{ animationDelay: "0.1s" }}
+        />
+        <div
+          className="w-2 h-2 bg-[#343148]/30 rounded-full animate-bounce"
+          style={{ animationDelay: "0.2s" }}
+        />
+      </div>
+    </div>
+  </div>
+);
 
+// ============ UTILITY FUNCTIONS WITH EXACT DECIMALS ============
 
+// ✅ NEW: Format exact amounts with 2 decimal places
+const formatExactAmount = (num) => {
+  if (!num || isNaN(num)) return "0.00";
+
+  // For large numbers, use compact notation with decimals
+  if (num >= 10000000) {
+    return `${(num / 10000000).toFixed(2)}Cr`; // Crore
+  }
+  if (num >= 100000) {
+    return `${(num / 100000).toFixed(2)}L`; // Lakh
+  }
+  if (num >= 1000) {
+    return `${(num / 1000).toFixed(2)}K`; // Thousand
+  }
+
+  // For smaller numbers, show exact amount with 2 decimals
+  return new Intl.NumberFormat("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(num);
+};
+
+// Keep this for counts (no decimals needed)
+const formatNumber = (num) => {
+  if (!num || isNaN(num)) return "0";
+  return new Intl.NumberFormat("en-IN", {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(Math.round(num));
+};
+
+const formatDate = (dateString) => {
+  if (!dateString) return "N/A";
+  return new Date(dateString).toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+};
+
+// ============ DUAL CURRENCY REVENUE CHART ============
+const RevenueChartDual = ({
+  title,
+  icon,
+  period,
+  onPeriodChange,
+  customDates,
+  onCustomApply,
+  data,
+  loading = false,
+}) => {
+  const showCustomInputs = period === "custom";
+
+  const chartData = {
+    labels: data?.chartData || [],
+    datasets: [
+      {
+        label: "INR Revenue",
+        data: data?.INR?.data?.map((item) => item.revenue) || [],
+        borderColor: "#10b981",
+        backgroundColor: "#10b98120",
+        fill: true,
+        tension: 0.4,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        pointBackgroundColor: "#10b981",
+        pointBorderColor: "#fff",
+        pointBorderWidth: 2,
+        yAxisID: "y-inr",
+      },
+      {
+        label: "USD Revenue",
+        data: data?.USD?.data?.map((item) => item.revenue) || [],
+        borderColor: "#3b82f6",
+        backgroundColor: "#3b82f620",
+        fill: true,
+        tension: 0.4,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        pointBackgroundColor: "#3b82f6",
+        pointBorderColor: "#fff",
+        pointBorderWidth: 2,
+        yAxisID: "y-usd",
+      },
+    ],
+  };
+
+  const options = {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: {
+      mode: "index",
+      intersect: false,
+    },
+    plugins: {
+      legend: {
+        display: true,
+        position: "top",
+        labels: {
+          usePointStyle: true,
+          padding: 15,
+          font: { size: 12, weight: "600" },
+        },
+      },
+      tooltip: {
+        backgroundColor: "rgba(52, 49, 72, 0.95)",
+        padding: 12,
+        cornerRadius: 8,
+        callbacks: {
+          label: (context) => {
+            const label = context.dataset.label || "";
+            const value = context.parsed.y;
+            const symbol = label.includes("INR") ? "₹" : "$";
+            return `${label}: ${symbol}${formatExactAmount(value)}`;
+          },
+        },
+      },
+    },
+    scales: {
+      "y-inr": {
+        type: "linear",
+        position: "left",
+        beginAtZero: true,
+        grid: { color: "rgba(16, 185, 129, 0.1)" },
+        ticks: {
+          color: "#10b981",
+          callback: (value) => `₹${formatExactAmount(value)}`,
+        },
+        title: {
+          display: true,
+          text: "INR (₹)",
+          color: "#10b981",
+          font: { size: 12, weight: "bold" },
+        },
+      },
+      "y-usd": {
+        type: "linear",
+        position: "right",
+        beginAtZero: true,
+        grid: { display: false },
+        ticks: {
+          color: "#3b82f6",
+          callback: (value) => `$${formatExactAmount(value)}`,
+        },
+        title: {
+          display: true,
+          text: "USD ($)",
+          color: "#3b82f6",
+          font: { size: 12, weight: "bold" },
+        },
+      },
+      x: {
+        grid: { display: false },
+        ticks: { color: "#6b7280", maxRotation: 45 },
+      },
+    },
+    animation: {
+      duration: 1000,
+      easing: "easeOutQuart",
+    },
+  };
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 h-full">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-100">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-gradient-to-br from-[#343148]/10 to-[#D7C39D]/10 rounded-xl">
+            {icon}
+          </div>
+          <h3 className="text-lg font-bold text-[#343148]">{title}</h3>
+        </div>
+        <select
+          value={period}
+          onChange={(e) => onPeriodChange(e.target.value)}
+          disabled={loading}
+          className="px-3 py-2 border border-gray-300 rounded-lg text-sm font-medium bg-white focus:outline-none focus:ring-2 focus:ring-[#D7C39D]/50 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <option value="today">Today</option>
+          <option value="yesterday">Yesterday</option>
+          <option value="week">Last 7 Days</option>
+          <option value="month">This Month</option>
+          <option value="lastMonth">Last Month</option>
+          <option value="year">This Year</option>
+          <option value="custom">Custom Range</option>
+        </select>
+      </div>
+
+      {/* Custom Date Inputs */}
+      {showCustomInputs && (
+        <div className="flex gap-2 mb-4 p-3 bg-gray-50 rounded-lg border">
+          <input
+            type="date"
+            value={customDates?.start || ""}
+            onChange={(e) =>
+              onCustomApply(e.target.value, customDates?.end || "")
+            }
+            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D7C39D]/50"
+          />
+          <input
+            type="date"
+            value={customDates?.end || ""}
+            onChange={(e) =>
+              onCustomApply(customDates?.start || "", e.target.value)
+            }
+            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D7C39D]/50"
+          />
+        </div>
+      )}
+
+      {/* Comparison Summary - Both Currencies */}
+      {data?.summary && (
+        <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* INR Summary */}
+          <div className="p-4 bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl border border-green-200">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-gray-600 font-medium uppercase tracking-wide">
+                  INR Revenue
+                </p>
+                <p className="text-2xl font-bold text-green-700 mt-1">
+                  ₹{formatExactAmount(data.INR?.total || 0)}
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs text-gray-600 font-medium uppercase tracking-wide">
+                  Change
+                </p>
+                <div
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold mt-1 ${
+                    data.INR?.isIncrease
+                      ? "bg-green-100 text-green-800"
+                      : "bg-red-100 text-red-800"
+                  }`}
+                >
+                  {data.INR?.isIncrease ? (
+                    <FiTrendingUp size={18} />
+                  ) : (
+                    <FiTrendingDown size={18} />
+                  )}
+                  {Math.abs(data.INR?.percentChange || 0).toFixed(1)}%
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* USD Summary */}
+          <div className="p-4 bg-gradient-to-r from-blue-50 to-cyan-50 rounded-xl border border-blue-200">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-gray-600 font-medium uppercase tracking-wide">
+                  USD Revenue
+                </p>
+                <p className="text-2xl font-bold text-blue-700 mt-1">
+                  ${formatExactAmount(data.USD?.total || 0)}
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs text-gray-600 font-medium uppercase tracking-wide">
+                  Change
+                </p>
+                <div
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-bold mt-1 ${
+                    data.USD?.isIncrease
+                      ? "bg-blue-100 text-blue-800"
+                      : "bg-red-100 text-red-800"
+                  }`}
+                >
+                  {data.USD?.isIncrease ? (
+                    <FiTrendingUp size={18} />
+                  ) : (
+                    <FiTrendingDown size={18} />
+                  )}
+                  {Math.abs(data.USD?.percentChange || 0).toFixed(1)}%
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Chart Container */}
+      <div className="h-80 relative">
+        {loading ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-white/80 backdrop-blur-sm rounded-xl">
+            <div className="w-8 h-8 border-2 border-[#D7C39D]/50 border-t-[#343148] rounded-full animate-spin" />
+          </div>
+        ) : data?.chartData?.length > 0 ? (
+          <Line data={chartData} options={options} />
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center text-gray-400 text-sm">
+            No data available for selected period
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
