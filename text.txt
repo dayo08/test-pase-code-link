@@ -1,24 +1,108 @@
 "use client";
+import CountryDropdown from "@/src/components/Common/CountryDropdown";
+import { CustomInputField } from "@/src/components/forms";
+import { profileCompanyInfoForm } from "@/src/components/lib/columns/clients";
+import useCountrySelector from "@/src/hooks/useCountryList";
 import { fetchClientBusinessProfile } from "@/src/redux/features/enterprise/client/clientThunks";
+import { getCountryCallingCode } from "libphonenumber-js";
 import { useParams } from "next/navigation";
-import React, { useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 
 export default function BusinessProfile() {
   const dispatch = useDispatch();
   const { id } = useParams();
-  const { clientBusinessProfile, loading } = useSelector(
+  const { clientBusinessProfile: profile, loading } = useSelector(
     (state) => state.enterpriseClient,
   );
 
   useEffect(() => {
-    if (id && !clientBusinessProfile) {
+    if (id && !profile) {
       dispatch(fetchClientBusinessProfile({ id }));
     }
-  }, [dispatch, id, clientBusinessProfile]);
+  }, [dispatch, id, profile]);
 
-  console.log(clientBusinessProfile)
-  return <div>page</div>;
+  const defaultCountryCode = profile?.countryCode || "US";
+  const {
+    selectedCountry,
+    showCountryDropdown,
+    filteredCountries,
+    countrySearch,
+    handleCountrySelect,
+    toggleDropdown,
+    updateSearch,
+  } = useCountrySelector(defaultCountryCode);
+
+  const [formData, setFormData] = useState({
+    companyName: profile?.companyName || "",
+    aboutCompany: profile?.aboutCompany || "",
+    countryCode: defaultCountryCode,
+    countryDialCode:
+      profile?.countryDialCode ||
+      `+${getCountryCallingCode(defaultCountryCode)}`,
+    mobileNumber: profile?.mobileNumber || "",
+    emailId: profile?.emailId || "",
+    websiteLink: profile?.websiteLink || "",
+    fb: profile?.fb || "",
+    instagram: profile?.instagram || "",
+    x: profile?.x || "",
+    youTube: profile?.youTube || "",
+    whatsapp: profile?.whatsapp || "",
+    pinterest: profile?.pinterest || "",
+    behance: profile?.behance || "",
+  });
+
+  const [errors, setErrors] = useState({});
+
+  const handleChange = useCallback(
+    (name, e, rqd = true) => {
+      const { value } = e.target;
+      if (rqd)
+        setErrors((prev) => ({
+          ...prev,
+          [name]: value ? "" : `${name} is required`,
+        }));
+
+      setFormData((prev) => ({ ...prev, [name]: value }));
+    },
+    [errors],
+  );
+
+  return (
+    <form className="grid grid-cols-1 xl:grid-cols-2 xl:gap-4 gap-3">
+      {profileCompanyInfoForm.map((item) => (
+        <div className="flex gap-2" key={item.field}>
+          {item.field === "mobileNumber" && (
+            <CountryDropdown
+              selectedCountry={selectedCountry}
+              showDropdown={showCountryDropdown}
+              filteredCountries={filteredCountries}
+              searchValue={countrySearch}
+              onToggle={toggleDropdown}
+              onCountrySelect={handleCountrySelect}
+              onSearchChange={updateSearch}
+              className="mt-6"
+            />
+          )}
+          <CustomInputField
+            {...item}
+            error={errors[item.field]}
+            value={formData[item.field]}
+            onChange={(e) => handleChange(item.field, e, item?.rqd)}
+          />
+        </div>
+      ))}
+
+      <div className="col-span-full">
+        <button
+          type="submit"
+          className="md:static fixed bottom-0 left-0 right-0 z-30 bg-primary text-white px-4 py-2 rounded hover:bg-secondary transition"
+        >
+          Save
+        </button>
+      </div>
+    </form>
+  );
 }
 
 
