@@ -1,505 +1,993 @@
+// src/app/admin/clients/[clientId]/payment-history/page.jsx
 "use client";
 import LoadingSkeleton from "@/src/loader/LoadingSkeleton";
-import { fetchEnterpriseClientCurrentPackage } from "@/src/redux/features/enterprise/client/clientThunks";
-import { formatDate } from "@/src/utils";
+import { fetchEnterpriseClientPaymentHistory } from "@/src/redux/features/enterprise/client/clientThunks";
 import { useParams } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
+  FiAlertCircle,
   FiAlertTriangle,
+  FiArrowLeft,
   FiCalendar,
   FiCheckCircle,
   FiClock,
   FiCreditCard,
   FiDatabase,
+  FiDollarSign,
+  FiDownload,
+  FiFileText,
   FiImage,
+  FiLayers,
   FiPackage,
+  FiRefreshCw,
+  FiShoppingCart,
   FiTrendingUp,
+  FiUsers,
   FiXCircle,
 } from "react-icons/fi";
 import { useDispatch, useSelector } from "react-redux";
 
-function CurrentPackage() {
+export default function ClientPaymentHistory() {
   const dispatch = useDispatch();
   const { id } = useParams();
-  const { clientCurrentPackage, loading } = useSelector(
+  const { clientPaymentHistory, loading } = useSelector(
     (state) => state.enterpriseClient
   );
 
+  const [selectedPayment, setSelectedPayment] = useState(null);
+  const [showModal, setShowModal] = useState(false);
+
   useEffect(() => {
-    if (id && !clientCurrentPackage) {
-      dispatch(fetchEnterpriseClientCurrentPackage({ id }));
+    if (id && !clientPaymentHistory) {
+      dispatch(fetchEnterpriseClientPaymentHistory({ id }));
     }
-  }, [dispatch, id]);
+  }, [dispatch, id, clientPaymentHistory]);
+
+  const openPaymentDetails = (payment) => {
+    setSelectedPayment(payment);
+    setShowModal(true);
+  };
 
   if (loading) return <LoadingSkeleton />;
-  if (!clientCurrentPackage?.package)
-    return <ErrorState message="No package data" />;
+  if (!clientPaymentHistory)
+    return <ErrorState message="Error loading payment history" />;
 
-  const pkg = clientCurrentPackage.package;
-  const limits = pkg.packageId || {};
-  const payment = pkg.paymentDetails || {};
+  const { actionBreakdown, timeline } = clientPaymentHistory;
 
+  // ✅ Calculate stats on client-side
+  const stats = calculateStats(timeline);
   return (
     <div className="min-h-screen">
-      <div className="max-w-[1600px] mx-auto">
-        {/* Compact Header with Status */}
-        <div
-          className={`mb-6 p-6 rounded-2xl shadow-lg border-2 ${
-            pkg.isExpired
-              ? "bg-gradient-to-r from-red-500 to-red-600 border-red-400"
-              : "bg-gradient-to-r from-[#343148] to-[#D7C39D] border-[#D7C39D]"
-          }`}
-        >
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <div className="w-14 h-14 bg-white/20 backdrop-blur rounded-xl flex items-center justify-center">
-                <FiPackage className="w-7 h-7 text-white" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-white">
-                  {limits.packageName || "Package"}
-                </h1>
-                <div className="flex items-center gap-3 mt-1">
-                  <span className="px-3 py-1 bg-white/20 rounded-full text-xs font-semibold text-white">
-                    {pkg.status}
-                  </span>
-                  {pkg.isTrial && (
-                    <span className="px-3 py-1 bg-yellow-400 rounded-full text-xs font-semibold text-gray-900">
-                      Trial
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-            <div className="flex items-center gap-6">
-              <div className="text-center">
-                <div
-                  className={`text-4xl font-black text-white ${
-                    pkg.daysLeft === 0 ? "animate-pulse" : ""
-                  }`}
-                >
-                  {pkg.daysLeft}
-                </div>
-                <div className="text-sm font-semibold text-white/80">
-                  Days Left
-                </div>
-              </div>
-              <div className="text-right">
-                <div className="text-sm text-white/70">Valid Till</div>
-                <div className="text-base font-bold text-white">
-                  {formatDate(pkg.endDate).date}
-                </div>
-              </div>
-            </div>
-          </div>
+      {/* Stats Overview - 2 Rows */}
+      <div className="space-y-4 mb-6">
+        {/* Row 1: Main Metrics */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatsCard
+            label="Total Transactions"
+            value={stats.totalTransactions}
+            icon={<FiFileText className="w-5 h-5" />}
+            color="blue"
+          />
+          <StatsCard
+            label="INR Revenue"
+            value={`₹${formatNumber(stats.INR.totalAmountPaid)}`}
+            icon={<FiDollarSign className="w-5 h-5" />}
+            color="green"
+            subtitle={`${stats.INR.count} transactions`}
+          />
+          <StatsCard
+            label="USD Revenue"
+            value={`$${formatNumber(stats.USD.totalAmountPaid)}`}
+            icon={<FiDollarSign className="w-5 h-5" />}
+            color="green"
+            subtitle={`${stats.USD.count} transactions`}
+          />
+          <StatsCard
+            label="Payment Status"
+            value={stats.successfulPayments}
+            icon={<FiCheckCircle className="w-5 h-5" />}
+            color="green"
+            subtitle={`Failed: ${stats.failedPayments} | Pending: ${stats.pendingPayments}`}
+          />
         </div>
 
-        {/* Main 2-Column Grid - Compact */}
-        <div className="grid grid-cols-1 xl:grid-cols-5 gap-6">
-          {/* Left: Package + Payment */}
-          <div className="xl:col-span-3 space-y-6">
-            {/* Package Info */}
-            <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden">
-              <div className="bg-gray-50 px-5 py-3 border-b border-gray-200">
-                <h2 className="text-base font-bold text-[#343148] flex items-center gap-2">
-                  <FiPackage className="w-5 h-5 text-[#D7C39D]" />
-                  Package Details
-                </h2>
-              </div>
-              <div className="p-5">
-                <table className="w-full text-sm">
-                  <tbody>
-                    {renderDynamicRow(
-                      "Start Date",
-                      formatDate(pkg.startDate).date,
-                      FiCalendar
-                    )}
-                    {renderDynamicRow(
-                      "End Date",
-                      formatDate(pkg.endDate).date,
-                      FiCalendar
-                    )}
-                    {limits.validityInDays &&
-                      renderDynamicRow(
-                        "Validity",
-                        `${limits.validityInDays} Days`,
-                        FiClock
-                      )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* ✅ COMPLETE PAYMENT BREAKDOWN - ADMIN VIEW */}
-            <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden">
-              <div className="bg-gray-50 px-5 py-3 border-b border-gray-200">
-                <h2 className="text-base font-bold text-[#343148] flex items-center gap-2">
-                  <FiCreditCard className="w-5 h-5 text-[#D7C39D]" />
-                  Payment Details (Admin View)
-                </h2>
-              </div>
-              <div className="p-5">
-                {/* ✅ PRIMARY PRICING - Main amounts */}
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4 p-4 bg-emerald-50 rounded-lg border border-emerald-200">
-                  <PaymentDetail
-                    label="Original Price"
-                    value={`${payment.symbol}${payment.packageOriginalPrice}`}
-                    highlight
-                    color="emerald"
-                  />
-                  <PaymentDetail
-                    label="Package Cost"
-                    value={`${payment.symbol}${payment.packageCost}`}
-                    highlight
-                    color="emerald"
-                  />
-                  <PaymentDetail
-                    label="Amount Paid"
-                    value={`${payment.symbol}${payment.amountPaid}`}
-                    highlight
-                    color="emerald"
-                  />
-                </div>
-
-                {/* ✅ DISCOUNTS & CREDITS */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4 p-4 bg-orange-50 rounded-lg border border-orange-200">
-                  {payment.packageDiscount > 0 && (
-                    <PaymentDetail
-                      label={`Discount ${payment.packageDiscount}%`}
-                      value={`-${payment.symbol}${payment.packageDiscountAmount}`}
-                      color="orange"
-                    />
-                  )}
-                  {payment.proratedCreditFull > 0 && (
-                    <PaymentDetail
-                      label="Prorated Credit (Full)"
-                      value={`${
-                        payment.symbol
-                      }${payment.proratedCreditFull?.toFixed(2)}`}
-                      color="orange"
-                    />
-                  )}
-                  {payment.proratedCreditApplied > 0 && (
-                    <PaymentDetail
-                      label="Credit Applied"
-                      value={`-${
-                        payment.symbol
-                      }${payment.proratedCreditApplied?.toFixed(2)}`}
-                      color="orange"
-                    />
-                  )}
-                  {payment.proratedCreditLost > 0 && (
-                    <PaymentDetail
-                      label="Credit Lost"
-                      value={`${
-                        payment.symbol
-                      }${payment.proratedCreditLost?.toFixed(2)}`}
-                      color="red"
-                    />
-                  )}
-                </div>
-
-                {/* ✅ TRANSACTION DETAILS */}
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6 p-4 bg-purple-50 rounded-lg border border-purple-200">
-                  {payment.amountDue !== undefined && (
-                    <PaymentDetail
-                      label="Amount Due"
-                      value={`${payment.symbol}${payment.amountDue}`}
-                      color="purple"
-                    />
-                  )}
-                  {payment.fee > 0 && (
-                    <PaymentDetail
-                      label="Transaction Fee (INR)"
-                      value={`₹${(payment.fee / 100)?.toFixed(2)}`}
-                      color="purple"
-                    />
-                  )}
-                  {payment.tax > 0 && (
-                    <PaymentDetail
-                      label="GST (INR)"
-                      value={`₹${(payment.tax / 100)?.toFixed(2)}`}
-                      color="purple"
-                    />
-                  )}
-                </div>
-
-                {/* Payment Info */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {payment.paymentStatus && (
-                    <InfoItem
-                      label="Status"
-                      value={
-                        <span
-                          className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${
-                            payment.paymentStatus === "completed"
-                              ? "bg-emerald-100 text-emerald-800"
-                              : "bg-yellow-100 text-yellow-800"
-                          }`}
-                        >
-                          {payment.paymentStatus}
-                        </span>
-                      }
-                    />
-                  )}
-                  {payment.paymentMethod && (
-                    <InfoItem
-                      label="Method"
-                      value={payment.paymentMethod.toUpperCase()}
-                    />
-                  )}
-                  {payment.currency && (
-                    <InfoItem
-                      label="Currency"
-                      value={`${payment.currency} (${payment.symbol})`}
-                    />
-                  )}
-                  {payment.paymentDate && (
-                    <InfoItem
-                      label="Date"
-                      value={formatDate(payment.paymentDate).date}
-                    />
-                  )}
-                  {payment.razorpayOrderId && (
-                    <InfoItem
-                      label="Order ID"
-                      value={payment.razorpayOrderId}
-                      mono
-                      truncate
-                    />
-                  )}
-                  {payment.razorpayPaymentId && (
-                    <InfoItem
-                      label="Payment ID"
-                      value={payment.razorpayPaymentId}
-                      mono
-                      truncate
-                    />
-                  )}
-                  {payment.invoiceNumber && (
-                    <InfoItem
-                      label="Invoice"
-                      value={`#${payment.invoiceNumber}`}
-                    />
-                  )}
-                  {payment.cardId && (
-                    <InfoItem
-                      label="Card ID"
-                      value={payment.cardId}
-                      mono
-                      truncate
-                    />
-                  )}
-                  {payment.acquirerData?.auth_code && (
-                    <InfoItem
-                      label="Auth Code"
-                      value={payment.acquirerData.auth_code}
-                    />
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Right: Usage Stats */}
-          <div className="xl:col-span-2 space-y-6">
-            {/* Usage Summary */}
-            <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden">
-              <div className="bg-gray-50 px-5 py-3 border-b border-gray-200">
-                <h2 className="text-base font-bold text-[#343148] flex items-center gap-2">
-                  <FiTrendingUp className="w-5 h-5 text-[#D7C39D]" />
-                  Usage Statistics
-                </h2>
-              </div>
-              <div className="p-5 space-y-4">
-                {pkg.eventsUsed !== undefined && limits.eventLimit && (
-                  <UsageBar
-                    label="Events"
-                    used={pkg.eventsUsed}
-                    limit={limits.eventLimit}
-                    icon={FiCalendar}
-                  />
-                )}
-                {pkg.storageUsed !== undefined && limits.totalPhotoMB && (
-                  <UsageBar
-                    label="Storage (MB)"
-                    used={pkg.storageUsed}
-                    limit={limits.totalPhotoMB}
-                    icon={FiDatabase}
-                  />
-                )}
-                {pkg.albumsUsed !== undefined && limits.imageLimitPerAlbum && (
-                  <UsageBar
-                    label="Albums"
-                    used={pkg.albumsUsed}
-                    limit={limits.imageLimitPerAlbum}
-                    icon={FiImage}
-                  />
-                )}
-                {pkg.photosUsed !== undefined && (
-                  <UsageStat
-                    label="Photos Uploaded"
-                    value={pkg.photosUsed}
-                    icon={FiImage}
-                  />
-                )}
-                {pkg.eventsRemaining !== undefined && (
-                  <UsageStat
-                    label="Events Remaining"
-                    value={pkg.eventsRemaining}
-                    icon={FiCalendar}
-                    color="green"
-                  />
-                )}
-              </div>
-            </div>
-
-            {/* Features - Compact Grid */}
-            <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden">
-              <div className="bg-gray-50 px-5 py-3 border-b border-gray-200">
-                <h2 className="text-base font-bold text-[#343148] flex items-center gap-2">
-                  <FiCheckCircle className="w-5 h-5 text-[#D7C39D]" />
-                  Features
-                </h2>
-              </div>
-              <div className="p-5">
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {Object.entries(limits)
-                    .filter(([key, value]) => typeof value === "boolean")
-                    .map(([key, enabled]) => (
-                      <FeatureChip
-                        key={key}
-                        label={formatFeatureName(key)}
-                        enabled={enabled}
-                      />
-                    ))}
-                </div>
-              </div>
-            </div>
-          </div>
+        {/* Row 2: Financial Breakdown */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatsCard
+            label="Total Discounts"
+            value={
+              <span className="space-y-1">
+                <span className="text-sm">
+                  ₹{formatNumber(stats.INR.totalDiscounts)}
+                </span>
+                <span className="text-sm">
+                  ${formatNumber(stats.USD.totalDiscounts)}
+                </span>
+              </span>
+            }
+            icon={<FiDollarSign className="w-5 h-5" />}
+            color="orange"
+            subtitle="INR / USD"
+          />
+          <StatsCard
+            label="Credit Applied"
+            value={
+              <span className="space-y-1">
+                <span className="text-sm">
+                  ₹{formatNumber(stats.INR.totalCreditApplied)}
+                </span>
+                <span className="text-sm">
+                  ${formatNumber(stats.USD.totalCreditApplied)}
+                </span>
+              </span>
+            }
+            icon={<FiRefreshCw className="w-5 h-5" />}
+            color="blue"
+            subtitle="INR / USD"
+          />
+          <StatsCard
+            label="Total Profit"
+            value={
+              <span className="space-y-1">
+                <span className="text-sm">
+                  ₹{formatNumber(stats.INR.totalCreditLost)}
+                </span>
+                <span className="text-sm">
+                  ${formatNumber(stats.USD.totalCreditLost)}
+                </span>
+              </span>
+            }
+            icon={<FiTrendingUp className="w-5 h-5" />}
+            color="purple"
+            subtitle="Credit Lost"
+          />
+          <StatsCard
+            label="Razorpay Fees (INR)"
+            value={`₹${formatNumber(
+              stats.INR.totalRazorpayFees + stats.USD.totalRazorpayFees
+            )}`}
+            icon={<FiCreditCard className="w-5 h-5" />}
+            color="orange"
+            subtitle={`GST: ₹${formatNumber(
+              stats.INR.totalRazorpayTax + stats.USD.totalRazorpayTax
+            )}`}
+          />
         </div>
       </div>
+
+      {/* Action Breakdown */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
+        <h2 className="text-lg font-semibold text-[#343148] mb-4">
+          Action Breakdown
+        </h2>
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+          <ActionBadge
+            label="Trial"
+            count={actionBreakdown.trial}
+            icon={<FiClock />}
+            color="gray"
+          />
+          <ActionBadge
+            label="Purchase"
+            count={actionBreakdown.purchase}
+            icon={<FiShoppingCart />}
+            color="blue"
+          />
+          <ActionBadge
+            label="Upgrade"
+            count={actionBreakdown.upgrade}
+            icon={<FiTrendingUp />}
+            color="purple"
+          />
+          <ActionBadge
+            label="Renewal"
+            count={actionBreakdown.renewal}
+            icon={<FiRefreshCw />}
+            color="green"
+          />
+          <ActionBadge
+            label="Expired"
+            count={actionBreakdown.expired}
+            icon={<FiAlertCircle />}
+            color="red"
+          />
+        </div>
+      </div>
+
+      {/* Timeline View */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <h2 className="text-lg font-semibold text-[#343148] mb-6">
+          Transaction Timeline
+        </h2>
+
+        <div className="relative">
+          {/* Timeline Line */}
+          <div className="absolute left-8 top-0 bottom-0 w-0.5 bg-gradient-to-b from-[#343148] via-[#D7C39D] to-gray-200" />
+
+          {timeline.map((period, periodIdx) => (
+            <div key={periodIdx} className="mb-8 last:mb-0">
+              {/* Month Header */}
+              <div className="flex items-center gap-4 mb-4 relative">
+                <div className="w-16 h-16 rounded-full bg-gradient-to-br from-[#343148] to-[#D7C39D] flex items-center justify-center text-white font-bold shadow-lg z-10">
+                  <div className="text-center">
+                    <div className="text-xs">{period.month.slice(0, 3)}</div>
+                    <div className="text-sm">{period.year}</div>
+                  </div>
+                </div>
+                <div className="text-sm text-gray-500">
+                  {period.payments.length} transaction
+                  {period.payments.length > 1 ? "s" : ""}
+                </div>
+              </div>
+
+              {/* Payment Cards */}
+              <div className="ml-24 space-y-4">
+                {period.payments.map((payment, payIdx) => (
+                  <PaymentCard
+                    key={payIdx}
+                    payment={payment}
+                    onClick={() => openPaymentDetails(payment)}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+
+          {timeline.length === 0 && (
+            <div className="text-center py-12">
+              <FiFileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+              <p className="text-gray-500">No payment history found</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Payment Details Modal */}
+      {showModal && selectedPayment && (
+        <PaymentDetailsModal
+          payment={selectedPayment}
+          onClose={() => setShowModal(false)}
+        />
+      )}
     </div>
   );
 }
 
-// ✅ NEW: Payment Detail Component
-const PaymentDetail = ({
-  label,
-  value,
-  highlight = false,
-  color = "emerald",
-}) => {
+// ============ COMPONENTS ============
+
+const StatsCard = ({ label, value, icon, color, subtitle }) => {
   const colorClasses = {
-    emerald: "text-emerald-600",
-    orange: "text-orange-600",
-    purple: "text-purple-600",
-    blue: "text-blue-600",
-    red: "text-red-600",
+    blue: "from-blue-500 to-blue-600",
+    green: "from-green-500 to-green-600",
+    orange: "from-orange-500 to-orange-600",
+    purple: "from-purple-500 to-purple-600",
   };
 
   return (
-    <div className={`p-3 rounded-lg ${highlight ? "bg-white shadow-sm" : ""}`}>
-      <div className="text-xs text-gray-600 uppercase tracking-wide font-medium">
-        {label}
-      </div>
-      <div className={`text-lg font-black ${colorClasses[color]}`}>{value}</div>
-    </div>
-  );
-};
-
-// ============ HELPER COMPONENTS ============
-const renderDynamicRow = (label, value, Icon) => {
-  if (!value || value === "Invalid Date") return null;
-  return (
-    <tr className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
-      <td className="py-3 pr-4 text-gray-600 font-medium flex items-center gap-2">
-        <Icon className="w-4 h-4 text-[#D7C39D]" />
-        {label}
-      </td>
-      <td className="py-3 text-[#343148] font-semibold text-right">{value}</td>
-    </tr>
-  );
-};
-
-const InfoItem = ({ label, value, mono = false, truncate = false }) => (
-  <div className="p-3 bg-gray-50 rounded-lg">
-    <div className="text-xs text-gray-600 mb-1">{label}</div>
-    <div
-      className={`text-sm font-bold text-[#343148] ${
-        mono ? "font-mono text-xs" : ""
-      } ${truncate ? "truncate" : ""}`}
-    >
-      {value}
-    </div>
-  </div>
-);
-
-const UsageBar = ({ label, used, limit, icon: Icon }) => {
-  const percentage = Math.min(100, Math.round((used / limit) * 100));
-  const remaining = Math.max(0, limit - used);
-
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <Icon className="w-4 h-4 text-[#343148]" />
-          <span className="text-sm font-semibold text-[#343148]">{label}</span>
-        </div>
-        <div className="text-xs font-bold text-gray-600">
-          {used.toLocaleString()} / {limit.toLocaleString()}
-        </div>
-      </div>
-      <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden mb-1">
+    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 hover:shadow-md transition-all">
+      <div className="flex items-center gap-3 mb-2">
         <div
-          className="h-full bg-gradient-to-r from-[#343148] to-[#D7C39D] rounded-full transition-all"
-          style={{ width: `${percentage}%` }}
+          className={`w-10 h-10 rounded-lg bg-gradient-to-br ${colorClasses[color]} flex items-center justify-center text-white`}
+        >
+          {icon}
+        </div>
+        <div className="flex-1">
+          <p className="text-xs text-gray-600 font-medium">{label}</p>
+          <p className="text-xl font-bold text-[#343148]">{value}</p>
+        </div>
+      </div>
+      {subtitle && (
+        <p className="text-xs text-gray-500 mt-1 ml-13">{subtitle}</p>
+      )}
+    </div>
+  );
+};
+
+const ActionBadge = ({ label, count, icon, color }) => {
+  const colorClasses = {
+    blue: "bg-blue-50 text-blue-700 border-blue-200",
+    green: "bg-green-50 text-green-700 border-green-200",
+    purple: "bg-purple-50 text-purple-700 border-purple-200",
+    orange: "bg-orange-50 text-orange-700 border-orange-200",
+    gray: "bg-gray-50 text-gray-700 border-gray-200",
+  };
+
+  return (
+    <div
+      className={`${colorClasses[color]} border rounded-lg p-3 flex items-center gap-2`}
+    >
+      <div className="text-lg">{icon}</div>
+      <div>
+        <p className="text-xs font-medium opacity-80">{label}</p>
+        <p className="text-lg font-bold">{count}</p>
+      </div>
+    </div>
+  );
+};
+
+const PaymentCard = ({ payment, onClick }) => {
+  const { paymentDetails, packageId, action, usageAtAction } = payment;
+  const statusConfig = getPaymentStatusConfig(paymentDetails.paymentStatus);
+  const actionConfig = getActionConfig(action);
+
+  // ✅ Get currency symbol dynamically
+  const currencySymbol =
+    paymentDetails.symbol || (paymentDetails.currency === "INR" ? "₹" : "$");
+  const currency = paymentDetails.currency || "USD";
+  return (
+    <div
+      onClick={onClick}
+      className="bg-white border border-gray-200 rounded-xl p-5 hover:shadow-lg hover:border-[#D7C39D] transition-all cursor-pointer group"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
+        {/* Left Section */}
+        <div className="flex items-start gap-3 flex-1">
+          <div
+            className={`w-12 h-12 rounded-lg ${actionConfig.bgColor} flex items-center justify-center text-white flex-shrink-0`}
+          >
+            {actionConfig.icon}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-1">
+              <h3 className="text-base font-semibold text-[#343148] truncate">
+                {packageId?.packageName || "Package"}
+              </h3>
+              <span
+                className={`px-2 py-0.5 rounded-full text-xs font-medium ${actionConfig.badgeColor}`}
+              >
+                {action.toUpperCase()}
+              </span>
+            </div>
+            <p className="text-xs text-gray-500">
+              {formatDate(payment.createdAt)} • {formatTime(payment.createdAt)}
+            </p>
+          </div>
+        </div>
+
+        {/* Right Section - Amount with Dynamic Currency */}
+        <div className="text-right">
+          <p className="text-2xl font-bold text-[#343148]">
+            {currencySymbol}
+            {formatNumber(paymentDetails.amountPaid || 0)}
+          </p>
+          <p className="text-xs text-gray-500 font-medium mb-1">{currency}</p>
+        </div>
+      </div>
+
+      {/* Payment Details Grid */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+        <DetailItem
+          icon={<FiCalendar />}
+          label="Duration"
+          value={`${calculateDuration(
+            payment.startDate,
+            payment.endDate
+          )} days`}
+        />
+        <DetailItem
+          icon={<FiFileText />}
+          label="Invoice"
+          value={paymentDetails.invoiceNumber || "N/A"}
+        />
+        <DetailItem
+          icon={<FiClock />}
+          label="Payment"
+          value={paymentDetails.paymentMethod || "N/A"}
+        />
+        <DetailItem
+          icon={statusConfig.icon}
+          label="Status"
+          value={
+            <span className={`font-medium ${statusConfig.textColor}`}>
+              {paymentDetails.paymentStatus}
+            </span>
+          }
         />
       </div>
-      <div className="flex justify-between text-xs text-gray-500">
-        <span>{percentage}% used</span>
-        <span>{remaining.toLocaleString()} left</span>
+
+      {/* Usage Stats */}
+      {usageAtAction && (
+        <div className="bg-gray-50 rounded-lg p-3">
+          <p className="text-xs font-semibold text-gray-600 mb-2">
+            Usage at Transaction
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <UsageItem
+              icon={<FiCalendar />}
+              label="Events"
+              value={usageAtAction.totalEvents || 0}
+            />
+            <UsageItem
+              icon={<FiLayers />}
+              label="Albums"
+              value={usageAtAction.totalAlbums || 0}
+            />
+            <UsageItem
+              icon={<FiImage />}
+              label="Photos"
+              value={formatNumber(usageAtAction.totalPhotos || 0)}
+            />
+            <UsageItem
+              icon={<FiDatabase />}
+              label="Storage"
+              value={`${((usageAtAction.totalMBUsed || 0) / 1024).toFixed(
+                1
+              )} GB`}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Hover Effect Indicator */}
+      <div className="mt-3 flex items-center justify-between text-xs text-gray-400 group-hover:text-[#D7C39D] transition-colors">
+        <span>Click to view full details</span>
+        <FiArrowLeft className="rotate-180" />
       </div>
     </div>
   );
 };
 
-const UsageStat = ({ label, value, icon: Icon, color = "blue" }) => {
-  const colors = {
-    blue: "bg-blue-50 text-blue-600",
-    green: "bg-green-50 text-green-600",
-    orange: "bg-orange-50 text-orange-600",
+const DetailItem = ({ icon, label, value }) => (
+  <div className="flex items-center gap-2">
+    <div className="text-gray-400">{icon}</div>
+    <div>
+      <p className="text-xs text-gray-500">{label}</p>
+      <p className="text-sm font-medium text-gray-900">{value}</p>
+    </div>
+  </div>
+);
+
+const UsageItem = ({ icon, label, value }) => (
+  <div className="flex items-center gap-2">
+    <div className="text-[#343148] text-sm">{icon}</div>
+    <div>
+      <p className="text-xs text-gray-600">{label}</p>
+      <p className="text-sm font-bold text-[#343148]">{value}</p>
+    </div>
+  </div>
+);
+
+const PaymentDetailsModal = ({ payment, onClose }) => {
+  const { paymentDetails, packageDetails, packageId, previousPackageId } =
+    payment;
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/50 bg-opacity-50 flex items-center justify-center z-50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Modal Header */}
+        <div className="sticky top-0 bg-gradient-to-r from-[#343148] to-[#D7C39D] text-white p-6 rounded-t-2xl">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-2xl font-bold">Payment Details</h2>
+              <p className="text-sm opacity-90 mt-1">
+                Transaction ID: {payment._id}
+              </p>
+            </div>
+            <button
+              onClick={onClose}
+              className="w-10 h-10 rounded-full flex items-center justify-center transition-all"
+            >
+              <FiXCircle className="w-6 h-6 text-primary" />
+            </button>
+          </div>
+        </div>
+
+        {/* Modal Body */}
+        <div className="p-6 space-y-6">
+          {/* Payment Information */}
+          <Section title="Payment Information" icon={<FiDollarSign />}>
+            {/* PRIMARY PRICING */}
+            <div className="mb-4">
+              <h4 className="text-sm font-semibold text-gray-700 mb-3">
+                Pricing Breakdown
+              </h4>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 p-4 bg-emerald-50 rounded-lg border border-emerald-200">
+                <PaymentDetailBox
+                  label="Original Price"
+                  value={`${paymentDetails.symbol || "$"}${formatNumber(
+                    paymentDetails.packageOriginalPrice || 0
+                  )}`}
+                  color="emerald"
+                />
+                <PaymentDetailBox
+                  label="Package Cost"
+                  value={`${paymentDetails.symbol || "$"}${formatNumber(
+                    paymentDetails.packageCost || 0
+                  )}`}
+                  color="emerald"
+                />
+                <PaymentDetailBox
+                  label="Amount Paid"
+                  value={`${paymentDetails.symbol || "$"}${formatNumber(
+                    paymentDetails.amountPaid || 0
+                  )}`}
+                  color="emerald"
+                />
+              </div>
+            </div>
+
+            {/* DISCOUNTS & CREDITS */}
+            <div className="mb-4">
+              <h4 className="text-sm font-semibold text-gray-700 mb-3">
+                Discounts & Credits
+              </h4>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-4 bg-orange-50 rounded-lg border border-orange-200">
+                {paymentDetails.packageDiscount > 0 && (
+                  <PaymentDetailBox
+                    label={`Discount ${paymentDetails.packageDiscount}%`}
+                    value={`-${paymentDetails.symbol || "$"}${formatNumber(
+                      paymentDetails.packageDiscountAmount || 0
+                    )}`}
+                    color="orange"
+                  />
+                )}
+                {paymentDetails.proratedCreditFull > 0 && (
+                  <PaymentDetailBox
+                    label="Credit (Full)"
+                    value={`${
+                      paymentDetails.symbol || "$"
+                    }${paymentDetails.proratedCreditFull?.toFixed(2)}`}
+                    color="orange"
+                  />
+                )}
+                {paymentDetails.proratedCreditApplied > 0 && (
+                  <PaymentDetailBox
+                    label="Credit Applied"
+                    value={`-${
+                      paymentDetails.symbol || "$"
+                    }${paymentDetails.proratedCreditApplied?.toFixed(2)}`}
+                    color="orange"
+                  />
+                )}
+                {paymentDetails.proratedCreditLost > 0 && (
+                  <PaymentDetailBox
+                    label="Credit Lost (Profit)"
+                    value={`${
+                      paymentDetails.symbol || "$"
+                    }${paymentDetails.proratedCreditLost?.toFixed(2)}`}
+                    color="red"
+                  />
+                )}
+              </div>
+            </div>
+
+            {/* TRANSACTION DETAILS */}
+            <div className="mb-4">
+              <h4 className="text-sm font-semibold text-gray-700 mb-3">
+                Transaction Fees (INR)
+              </h4>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 p-4 bg-purple-50 rounded-lg border border-purple-200">
+                {paymentDetails.amountDue !== undefined && (
+                  <PaymentDetailBox
+                    label="Amount Due"
+                    value={`${paymentDetails.symbol || "$"}${formatNumber(
+                      paymentDetails.amountDue
+                    )}`}
+                    color="purple"
+                  />
+                )}
+                {paymentDetails.fee > 0 && (
+                  <PaymentDetailBox
+                    label="Razorpay Fee"
+                    value={`₹${(paymentDetails.fee / 100)?.toFixed(2)}`}
+                    color="purple"
+                  />
+                )}
+                {paymentDetails.tax > 0 && (
+                  <PaymentDetailBox
+                    label="GST (18%)"
+                    value={`₹${(paymentDetails.tax / 100)?.toFixed(2)}`}
+                    color="purple"
+                  />
+                )}
+              </div>
+            </div>
+
+            {/* OTHER INFO */}
+            <InfoGrid>
+              {paymentDetails.paymentStatus && (
+                <InfoItem
+                  label="Payment Status"
+                  value={
+                    <span
+                      className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                        getPaymentStatusConfig(paymentDetails.paymentStatus)
+                          .badgeColor
+                      }`}
+                    >
+                      {paymentDetails.paymentStatus}
+                    </span>
+                  }
+                />
+              )}
+              {paymentDetails.paymentMethod && (
+                <InfoItem
+                  label="Payment Method"
+                  value={paymentDetails.paymentMethod.toUpperCase()}
+                />
+              )}
+              {paymentDetails.currency && (
+                <InfoItem
+                  label="Currency"
+                  value={`${paymentDetails.currency} (${
+                    paymentDetails.symbol || "$"
+                  })`}
+                />
+              )}
+              {paymentDetails.paymentDate && (
+                <InfoItem
+                  label="Payment Date"
+                  value={formatFullDate(paymentDetails.paymentDate)}
+                />
+              )}
+              {paymentDetails.cardId && (
+                <InfoItem
+                  label="Card ID"
+                  value={paymentDetails.cardId}
+                  copyable
+                />
+              )}
+              {paymentDetails.acquirerData?.auth_code && (
+                <InfoItem
+                  label="Auth Code"
+                  value={paymentDetails.acquirerData.auth_code}
+                />
+              )}
+            </InfoGrid>
+          </Section>
+
+          {/* Razorpay Details */}
+          <Section title="Razorpay Details" icon={<FiFileText />}>
+            <InfoGrid>
+              <InfoItem
+                label="Order ID"
+                value={paymentDetails.razorpayOrderId || "N/A"}
+                copyable
+              />
+              <InfoItem
+                label="Payment ID"
+                value={paymentDetails.razorpayPaymentId || "N/A"}
+                copyable
+              />
+              <InfoItem
+                label="Invoice Number"
+                value={paymentDetails.invoiceNumber || "N/A"}
+              />
+              <InfoItem
+                label="Invoice URL"
+                value={
+                  paymentDetails.invoiceUrl ? (
+                    <a
+                      href={paymentDetails.invoiceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[#343148] hover:text-[#D7C39D] underline flex items-center gap-1"
+                    >
+                      Download <FiDownload className="w-3 h-3" />
+                    </a>
+                  ) : (
+                    "N/A"
+                  )
+                }
+              />
+            </InfoGrid>
+            {paymentDetails.failureReason && (
+              <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+                <p className="text-xs font-semibold text-red-700 mb-1">
+                  Failure Reason:
+                </p>
+                <p className="text-sm text-red-600">
+                  {paymentDetails.failureReason}
+                </p>
+              </div>
+            )}
+          </Section>
+
+          {/* Package Information */}
+          <Section title="Package Information" icon={<FiPackage />}>
+            <InfoGrid>
+              <InfoItem
+                label="Package Name"
+                value={
+                  packageId?.packageName || packageDetails?.packageName || "N/A"
+                }
+              />
+              <InfoItem
+                label="Action Type"
+                value={
+                  <span
+                    className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                      getActionConfig(payment.action).badgeColor
+                    }`}
+                  >
+                    {payment.action.toUpperCase()}
+                  </span>
+                }
+              />
+              <InfoItem
+                label="Start Date"
+                value={
+                  payment.startDate ? formatFullDate(payment.startDate) : "N/A"
+                }
+              />
+              <InfoItem
+                label="End Date"
+                value={
+                  payment.endDate ? formatFullDate(payment.endDate) : "N/A"
+                }
+              />
+              <InfoItem
+                label="Validity"
+                value={`${calculateDuration(
+                  payment.startDate,
+                  payment.endDate
+                )} days`}
+              />
+              <InfoItem
+                label="Is Active"
+                value={
+                  payment.isActive ? (
+                    <FiCheckCircle className="w-5 h-5 text-green-600" />
+                  ) : (
+                    <FiXCircle className="w-5 h-5 text-red-600" />
+                  )
+                }
+              />
+            </InfoGrid>
+            {previousPackageId && (
+              <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="text-xs font-semibold text-blue-700">
+                  Previous Package: {previousPackageId.packageName}
+                </p>
+              </div>
+            )}
+          </Section>
+
+          {/* Package Details (Features) */}
+          {packageDetails && (
+            <Section title="Package Features" icon={<FiLayers />}>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <FeatureItem
+                  label="Total Storage"
+                  value={`${packageDetails.totalPhotoMB} MB`}
+                />
+                <FeatureItem
+                  label="Event Limit"
+                  value={packageDetails.eventLimit}
+                />
+                <FeatureItem
+                  label="Images per Album"
+                  value={packageDetails.imageLimitPerAlbum}
+                />
+                <FeatureItem
+                  label="Max Photo Size"
+                  value={`${packageDetails.maximumPhotoSize} MB`}
+                />
+                <FeatureItem
+                  label="Guests per Event"
+                  value={packageDetails.totalGuestsAllowPerEvent}
+                />
+                <FeatureItem
+                  label="Face Recognition"
+                  enabled={packageDetails.faceRecognition}
+                />
+                <FeatureItem
+                  label="Custom Themes"
+                  enabled={packageDetails.customisableEventThemes}
+                />
+                <FeatureItem
+                  label="Guest Uploads"
+                  enabled={packageDetails.guestUploads}
+                />
+                <FeatureItem
+                  label="Bulk Download"
+                  enabled={packageDetails.bulkDownload}
+                />
+                <FeatureItem
+                  label="Analytics"
+                  enabled={packageDetails.analytics}
+                />
+                <FeatureItem label="QR Code" enabled={packageDetails.qrCode} />
+                <FeatureItem
+                  label="Watermark"
+                  enabled={packageDetails.watermark}
+                />
+              </div>
+            </Section>
+          )}
+
+          {/* Usage at Action */}
+          {payment.usageAtAction && (
+            <Section title="Usage at Transaction Time" icon={<FiDatabase />}>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                <UsageCard
+                  icon={<FiCalendar />}
+                  label="Events"
+                  value={payment.usageAtAction.totalEvents || 0}
+                  color="blue"
+                />
+                <UsageCard
+                  icon={<FiLayers />}
+                  label="Albums"
+                  value={payment.usageAtAction.totalAlbums || 0}
+                  color="purple"
+                />
+                <UsageCard
+                  icon={<FiImage />}
+                  label="Photos"
+                  value={formatNumber(payment.usageAtAction.totalPhotos || 0)}
+                  color="green"
+                />
+                <UsageCard
+                  icon={<FiDatabase />}
+                  label="Storage"
+                  value={`${(
+                    (payment.usageAtAction.totalMBUsed || 0) / 1024
+                  ).toFixed(2)} GB`}
+                  color="orange"
+                />
+                <UsageCard
+                  icon={<FiUsers />}
+                  label="Guests"
+                  value={payment.usageAtAction.activeGuests || 0}
+                  color="pink"
+                />
+              </div>
+            </Section>
+          )}
+
+          {/* Notes */}
+          {(payment.notes || payment.systemNotes) && (
+            <Section title="Notes" icon={<FiFileText />}>
+              {payment.notes && (
+                <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <p className="text-xs font-semibold text-blue-700 mb-1">
+                    User Notes:
+                  </p>
+                  <p className="text-sm text-blue-900">{payment.notes}</p>
+                </div>
+              )}
+              {payment.systemNotes && (
+                <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                  <p className="text-xs font-semibold text-gray-700 mb-1">
+                    System Notes:
+                  </p>
+                  <p className="text-sm text-gray-900">{payment.systemNotes}</p>
+                </div>
+              )}
+            </Section>
+          )}
+
+          {/* Timestamps */}
+          <Section title="Timestamps" icon={<FiClock />}>
+            <InfoGrid>
+              <InfoItem
+                label="Created At"
+                value={formatFullDate(payment.createdAt)}
+              />
+              <InfoItem
+                label="Updated At"
+                value={formatFullDate(payment.updatedAt)}
+              />
+            </InfoGrid>
+          </Section>
+        </div>
+
+        {/* Modal Footer */}
+        <div className="sticky bottom-0 bg-gray-50 p-4 rounded-b-2xl border-t border-gray-200">
+          <button
+            onClick={onClose}
+            className="w-full py-3 bg-[#343148] text-white rounded-lg hover:bg-[#D7C39D] transition-colors font-medium"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const Section = ({ title, icon, children }) => (
+  <div className="border border-gray-200 rounded-xl p-5 bg-gray-50">
+    <div className="flex items-center gap-2 mb-4">
+      <div className="text-[#343148] text-lg">{icon}</div>
+      <h3 className="text-base font-semibold text-[#343148]">{title}</h3>
+    </div>
+    {children}
+  </div>
+);
+
+const InfoGrid = ({ children }) => (
+  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{children}</div>
+);
+
+const InfoItem = ({ label, value, highlight, copyable }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    if (typeof value === "string") {
+      navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const highlightColors = {
+    green: "text-green-600",
+    blue: "text-[#343148]",
   };
 
   return (
-    <div className={`p-3 rounded-lg ${colors[color]}`}>
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Icon className="w-4 h-4" />
-          <span className="text-sm font-semibold">{label}</span>
-        </div>
-        <span className="text-xl font-black">{value.toLocaleString()}</span>
+    <div className="flex flex-col">
+      <p className="text-xs text-gray-500 font-medium mb-1">{label}</p>
+      <div className="flex items-center gap-2">
+        <p
+          className={`text-sm font-semibold ${
+            highlight ? highlightColors[highlight] : "text-gray-900"
+          }`}
+        >
+          {value}
+        </p>
+        {copyable && (
+          <button
+            onClick={handleCopy}
+            className="text-[#343148] hover:text-[#D7C39D] transition-colors"
+            title="Copy to clipboard"
+          >
+            {copied ? (
+              <FiCheckCircle className="w-4 h-4 text-green-600" />
+            ) : (
+              <FiFileText className="w-4 h-4" />
+            )}
+          </button>
+        )}
       </div>
     </div>
   );
 };
 
-const FeatureChip = ({ label, enabled }) => (
-  <div
-    className={`px-2 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 ${
-      enabled
-        ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-        : "bg-gray-100 text-gray-500 border border-gray-200"
-    }`}
-  >
-    {enabled ? (
-      <FiCheckCircle className="w-3 h-3" />
+const FeatureItem = ({ label, value, enabled }) => (
+  <div className="flex items-center justify-between p-2 bg-white rounded-lg border border-gray-200">
+    <span className="text-xs text-gray-700">{label}</span>
+    {enabled !== undefined ? (
+      enabled ? (
+        <FiCheckCircle className="w-4 h-4 text-green-600" />
+      ) : (
+        <FiXCircle className="w-4 h-4 text-red-600" />
+      )
     ) : (
-      <FiXCircle className="w-3 h-3" />
+      <span className="text-xs font-semibold text-[#343148]">{value}</span>
     )}
-    <span className="truncate">{label}</span>
   </div>
 );
+
+const UsageCard = ({ icon, label, value, color }) => {
+  const colorClasses = {
+    blue: "from-blue-500 to-blue-600",
+    purple: "from-purple-500 to-purple-600",
+    green: "from-green-500 to-green-600",
+    orange: "from-orange-500 to-orange-600",
+    pink: "from-pink-500 to-pink-600",
+  };
+
+  return (
+    <div className="bg-white rounded-lg p-4 border border-gray-200 text-center">
+      <div
+        className={`w-10 h-10 rounded-lg bg-gradient-to-br ${colorClasses[color]} flex items-center justify-center text-white mx-auto mb-2`}
+      >
+        {icon}
+      </div>
+      <p className="text-xs text-gray-600 mb-1">{label}</p>
+      <p className="text-lg font-bold text-[#343148]">{value}</p>
+    </div>
+  );
+};
 
 const ErrorState = ({ message }) => (
   <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
@@ -515,103 +1003,339 @@ const ErrorState = ({ message }) => (
     </div>
   </div>
 );
+// ============ UTILITY FUNCTIONS ============
 
-const formatFeatureName = (key) => {
-  return key
-    .replace(/([A-Z])/g, " $1")
-    .replace(/^./, (str) => str.toUpperCase())
-    .trim();
+const getPaymentStatusConfig = (status) => {
+  const configs = {
+    success: {
+      icon: <FiCheckCircle />,
+      textColor: "text-green-600",
+      badgeColor: "bg-green-100 text-green-800",
+    },
+    failed: {
+      icon: <FiXCircle />,
+      textColor: "text-red-600",
+      badgeColor: "bg-red-100 text-red-800",
+    },
+    pending: {
+      icon: <FiClock />,
+      textColor: "text-orange-600",
+      badgeColor: "bg-orange-100 text-orange-800",
+    },
+  };
+  return configs[status] || configs.pending;
 };
 
-export default CurrentPackage;
+const getActionConfig = (action) => {
+  const configs = {
+    // Trial Actions
+    trial_started: {
+      icon: <FiClock className="w-6 h-6" />,
+      bgColor: "bg-gradient-to-br from-gray-500 to-gray-600",
+      badgeColor: "bg-gray-100 text-gray-800",
+      label: "Trial Started",
+    },
+    trial_upgraded: {
+      icon: <FiTrendingUp className="w-6 h-6" />,
+      bgColor: "bg-gradient-to-br from-purple-500 to-purple-600",
+      badgeColor: "bg-purple-100 text-purple-800",
+      label: "Trial Upgraded",
+    },
+    trial_expired: {
+      icon: <FiXCircle className="w-6 h-6" />,
+      bgColor: "bg-gradient-to-br from-red-500 to-red-600",
+      badgeColor: "bg-red-100 text-red-800",
+      label: "Trial Expired",
+    },
+
+    // Subscription Actions
+    subscription_started: {
+      icon: <FiShoppingCart className="w-6 h-6" />,
+      bgColor: "bg-gradient-to-br from-blue-500 to-blue-600",
+      badgeColor: "bg-blue-100 text-blue-800",
+      label: "Subscription Started",
+    },
+    subscription_changed: {
+      icon: <FiRefreshCw className="w-6 h-6" />,
+      bgColor: "bg-gradient-to-br from-indigo-500 to-indigo-600",
+      badgeColor: "bg-indigo-100 text-indigo-800",
+      label: "Subscription Changed",
+    },
+    subscription_renewed: {
+      icon: <FiRefreshCw className="w-6 h-6" />,
+      bgColor: "bg-gradient-to-br from-green-500 to-green-600",
+      badgeColor: "bg-green-100 text-green-800",
+      label: "Subscription Renewed",
+    },
+    subscription_expired: {
+      icon: <FiXCircle className="w-6 h-6" />,
+      bgColor: "bg-gradient-to-br from-red-500 to-red-600",
+      badgeColor: "bg-red-100 text-red-800",
+      label: "Subscription Expired",
+    },
+
+    // Upgrade/Renewal Actions
+    upgrade_initiated: {
+      icon: <FiTrendingUp className="w-6 h-6" />,
+      bgColor: "bg-gradient-to-br from-purple-500 to-purple-600",
+      badgeColor: "bg-purple-100 text-purple-800",
+      label: "Upgrade Initiated",
+    },
+    renewal_initiated: {
+      icon: <FiClock className="w-6 h-6" />,
+      bgColor: "bg-gradient-to-br from-green-500 to-green-600",
+      badgeColor: "bg-green-100 text-green-800",
+      label: "Renewal Initiated",
+    },
+  };
+
+  return (
+    configs[action] || {
+      icon: <FiFileText className="w-6 h-6" />,
+      bgColor: "bg-gradient-to-br from-gray-500 to-gray-600",
+      badgeColor: "bg-gray-100 text-gray-800",
+      label: action.replace(/_/g, " ").toUpperCase(),
+    }
+  );
+};
+
+const formatNumber = (num) => {
+  if (!num) return "0";
+  return new Intl.NumberFormat("en-IN").format(num);
+};
+
+const formatDate = (date) => {
+  return new Date(date).toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+};
+
+const formatTime = (date) => {
+  return new Date(date).toLocaleTimeString("en-IN", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
+const formatFullDate = (date) => {
+  return new Date(date).toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
+const calculateDuration = (startDate, endDate) => {
+  if (!startDate || !endDate) return 0;
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  const diffTime = Math.abs(end - start);
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  return diffDays;
+};
+
+const PaymentDetailBox = ({ label, value, color = "emerald" }) => {
+  const colorClasses = {
+    emerald: "text-emerald-700 font-black",
+    orange: "text-orange-700 font-black",
+    purple: "text-purple-700 font-black",
+    red: "text-red-700 font-black",
+  };
+
+  return (
+    <div className="bg-white rounded-lg p-3 shadow-sm">
+      <div className="text-xs text-gray-600 uppercase tracking-wide font-medium mb-1">
+        {label}
+      </div>
+      <div className={`text-lg ${colorClasses[color]}`}>{value}</div>
+    </div>
+  );
+};
+
+// ============ CLIENT-SIDE STATS CALCULATION ============
+const calculateStats = (timeline) => {
+  // Flatten all payments from timeline
+  const allPayments = timeline.flatMap((period) => period.payments);
+
+  // Filter by payment status
+  const completedPayments = allPayments.filter(
+    (p) => p.paymentDetails.paymentStatus === "completed"
+  );
+  const failedPayments = allPayments.filter(
+    (p) => p.paymentDetails.paymentStatus === "failed"
+  );
+  const pendingPayments = allPayments.filter(
+    (p) => p.paymentDetails.paymentStatus === "pending"
+  );
+
+  // Separate by currency
+  const inrPayments = completedPayments.filter(
+    (p) => p.paymentDetails.currency === "INR"
+  );
+  const usdPayments = completedPayments.filter(
+    (p) => p.paymentDetails.currency === "USD"
+  );
+
+  // Calculate INR metrics
+  const inrStats = {
+    totalAmountPaid: inrPayments.reduce(
+      (sum, p) => sum + (p.paymentDetails.amountPaid || 0),
+      0
+    ),
+    totalOriginalAmount: inrPayments.reduce(
+      (sum, p) => sum + (p.paymentDetails.packageOriginalPrice || 0),
+      0
+    ),
+    totalDiscounts: inrPayments.reduce(
+      (sum, p) => sum + (p.paymentDetails.packageDiscountAmount || 0),
+      0
+    ),
+    totalCreditApplied: inrPayments.reduce(
+      (sum, p) => sum + (p.paymentDetails.proratedCreditApplied || 0),
+      0
+    ),
+    totalCreditLost: inrPayments.reduce(
+      (sum, p) => sum + (p.paymentDetails.proratedCreditLost || 0),
+      0
+    ),
+    totalRazorpayFees: inrPayments.reduce(
+      (sum, p) => sum + (p.paymentDetails.fee || 0) / 100,
+      0
+    ),
+    totalRazorpayTax: inrPayments.reduce(
+      (sum, p) => sum + (p.paymentDetails.tax || 0) / 100,
+      0
+    ),
+    count: inrPayments.length,
+  };
+
+  // Calculate USD metrics
+  const usdStats = {
+    totalAmountPaid: usdPayments.reduce(
+      (sum, p) => sum + (p.paymentDetails.amountPaid || 0),
+      0
+    ),
+    totalOriginalAmount: usdPayments.reduce(
+      (sum, p) => sum + (p.paymentDetails.packageOriginalPrice || 0),
+      0
+    ),
+    totalDiscounts: usdPayments.reduce(
+      (sum, p) => sum + (p.paymentDetails.packageDiscountAmount || 0),
+      0
+    ),
+    totalCreditApplied: usdPayments.reduce(
+      (sum, p) => sum + (p.paymentDetails.proratedCreditApplied || 0),
+      0
+    ),
+    totalCreditLost: usdPayments.reduce(
+      (sum, p) => sum + (p.paymentDetails.proratedCreditLost || 0),
+      0
+    ),
+    totalRazorpayFees: usdPayments.reduce(
+      (sum, p) => sum + (p.paymentDetails.fee || 0) / 100,
+      0
+    ),
+    totalRazorpayTax: usdPayments.reduce(
+      (sum, p) => sum + (p.paymentDetails.tax || 0) / 100,
+      0
+    ),
+    count: usdPayments.length,
+  };
+
+  return {
+    totalTransactions: allPayments.length,
+    successfulPayments: completedPayments.length,
+    failedPayments: failedPayments.length,
+    pendingPayments: pendingPayments.length,
+    totalProfit: inrStats.totalCreditLost + usdStats.totalCreditLost,
+    INR: inrStats,
+    USD: usdStats,
+  };
+};
 
 
 
 
 
-/*** Get Client Current Package ***/
-const getClientCurrentPackage = async (req, res, next) => {
+
+
+
+
+/* client package payment-history  */
+const getClientPackagePaymentHistory = async (req, res, next) => {
   try {
     const { clientId } = req.params;
 
-    const client = await EnterpriseClient.exists({ _id: clientId });
-
-    if (!client) {
-      return throwHttpError(
-        "bad_request",
-        constants.client.notFound,
-        HTTP.NOT_FOUND
-      );
-    }
-
-    // Current Package (most recent active or latest)
-    const latestPackage = await EnterpriseClientPackage.findOne({
+    // Fetch ALL payment history (no limit, no pagination)
+    const paymentHistory = await EnterprisePackageHistory.find({
       enterpriseClientId: clientId,
     })
-      .populate("packageId")
-      .lean();
+      .populate("packageId", "packageName cost discount validityInDays")
+      .populate("previousPackageId", "packageName")
+      .sort({ createdAt: -1 }); // Latest first
 
-    // Usage from CLIENT'S EVENTS
-    const usageStats = await EnterpriseClientEvent.aggregate([
-      {
-        $match: {
-          enterpriseClientId: new mongoose.Types.ObjectId(clientId),
-          deletedAt: null,
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          totalEvents: { $sum: 1 },
-          totalAlbums: { $sum: "$totalAlbums" },
-          totalPhotos: { $sum: "$totalPhotos" },
-          totalMBUsed: { $sum: "$totalMBUsed" },
-        },
-      },
-    ]);
+    // Group by action type
+    const actionBreakdown = {
+      trial: paymentHistory.filter((p) =>
+        [
+          SubscriptionAction.TRIAL_STARTED,
+          SubscriptionAction.TRIAL_EXPIRED,
+        ].includes(p.action),
+      ).length,
 
-    const now = new Date();
-    const isExpired = latestPackage && new Date(latestPackage.endDate) < now;
-    const daysLeft = latestPackage
-      ? Math.max(
-          0,
-          Math.ceil(
-            (new Date(latestPackage.endDate) - now) / (24 * 60 * 60 * 1000)
-          )
-        )
-      : 0;
+      purchase: paymentHistory.filter(
+        (p) => p.action === SubscriptionAction.SUBSCRIPTION_STARTED,
+      ).length,
 
-    // Package limits from packageId
-    const limits = latestPackage?.packageId || {};
+      upgrade: paymentHistory.filter((p) =>
+        [
+          SubscriptionAction.UPGRADE_INITIATED,
+          SubscriptionAction.TRIAL_UPGRADED,
+          SubscriptionAction.SUBSCRIPTION_CHANGED,
+        ].includes(p.action),
+      ).length,
+
+      renewal: paymentHistory.filter((p) =>
+        [
+          SubscriptionAction.RENEWAL_INITIATED,
+          SubscriptionAction.SUBSCRIPTION_RENEWED,
+        ].includes(p.action),
+      ).length,
+
+      expired: paymentHistory.filter((p) =>
+        [
+          SubscriptionAction.SUBSCRIPTION_EXPIRED,
+          SubscriptionAction.TRIAL_EXPIRED,
+        ].includes(p.action),
+      ).length,
+    };
+
+    // Group by year and month for timeline
+    const timelineData = paymentHistory.reduce((acc, payment) => {
+      const date = new Date(payment.createdAt);
+      const year = date.getFullYear();
+      const month = date.toLocaleString("default", { month: "long" });
+      const key = `${year}-${month}`;
+
+      if (!acc[key]) {
+        acc[key] = {
+          year,
+          month,
+          payments: [],
+        };
+      }
+      acc[key].payments.push(payment);
+      return acc;
+    }, {});
 
     return await jsonOne(res, HTTP.SUCCESS, {
-      package: {
-        ...latestPackage,
-        isExpired,
-        daysLeft,
-        status: isExpired
-          ? "Expired"
-          : latestPackage?.isActive
-          ? "Active"
-          : "Inactive",
-        storageUsed: usageStats[0]?.totalMBUsed || 0,
-        storageLimit: limits.totalPhotoMB || 0,
-        storagePercentage: limits.totalPhotoMB
-          ? Math.min(
-              100,
-              Math.round(
-                ((usageStats[0]?.totalMBUsed || 0) / limits.totalPhotoMB) * 100
-              )
-            )
-          : 0,
-        eventsUsed: usageStats[0]?.totalEvents || 0,
-        eventsRemaining: limits.eventLimit
-          ? limits.eventLimit - (usageStats[0]?.totalEvents || 0)
-          : 0,
-        albumsUsed: usageStats[0]?.totalAlbums || 0,
-        photosUsed: usageStats[0]?.totalPhotos || 0,
-        paymentDetails: latestPackage?.paymentDetails || {},
-      },
+      actionBreakdown,
+      timeline: Object.values(timelineData),
+      totalRecords: paymentHistory.length,
     });
   } catch (error) {
     next(error);
