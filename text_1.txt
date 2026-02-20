@@ -1,738 +1,243 @@
+import crypto from "crypto";
+import CameraToken from "../../models/enterprise/cameraToken.js";
+import CameraConnection from "../../models/enterprise/cameraConnection.js";
+import config from "../../config/config.js";
+import { jsonOne, throwHttpError } from "../../utils/generalUtils.js";
+import HTTP from "../../constants/httpStatusCodes.js";
+import { getIO } from "../../socket/socket.js";
+import { AccountStatus } from "../../utils/enums/index.js";
 
-import ColorThemeForm from "./ColorThemeForm";
-import CompanyInfoForm from "./CompanyInfoForm";
-import ProfilePhotoForm from "./ProfilePhotoForm";
-import SocialLink from "./SocialLink";
+// ✅ Generate new camera token (photographer does this once per camera)
+const createCameraToken = async (req, res, next) => {
+  try {
+    const { id: enterpriseClientId } = req.tokenPayload;
+    const { tokenName } = req.body; // e.g. "Canon R5 - Main Camera"
 
-export const FormSteps = ({ selectedTab, profile, onNext }) => {
-  switch (selectedTab) {
-    case "Company Info":
-      return <CompanyInfoForm profile={profile} onNext={onNext} />;
-    case "Color Theme":
-      return (
-        <ColorThemeForm
-          colorCode={profile?.colorThemeCode}
-          id={profile?._id}
-          onNext={onNext}
-        />
-      );
-    case "Profile Photo":
-      return <ProfilePhotoForm profile={profile} onNext={onNext} />;
-    case "Social Link":
-      return <SocialLink profile={profile} onNext={onNext} />;
-    default:
-      return null;
+    // Generate unique FTP credentials
+    const ftpUsername = `cam_${crypto.randomBytes(6).toString("hex")}`; // cam_a3f9b2c1d4e5
+    const ftpPassword = crypto.randomBytes(8).toString("hex"); // b2c1d4e5f6a7b8c9
+
+    const token = await CameraToken.create({
+      enterpriseClientId,
+      tokenName,
+      ftpUsername,
+      ftpPassword,
+    });
+
+    return jsonOne(res, HTTP.SUCCESS, {
+      _id: token._id,
+      tokenName: token.tokenName,
+      ftpCredentials: {
+        host: config.ftp.publicHost,
+        port: config.ftp.port,
+        username: ftpUsername,
+        password: ftpPassword,
+      },
+      cameraSetupGuide: {
+        canon:
+          "Menu → Network → FTP Transfer Settings → enter host/port/user/pass",
+        nikon: "Menu → Network → Connect to FTP Server → enter credentials",
+        sony: "Menu → Network → FTP Transfer Func → Server Settings",
+        fujifilm: "Menu → Wireless Settings → FTP Uploading → Server Settings",
+      },
+    });
+  } catch (error) {
+    next(error);
   }
 };
 
+// ✅ Get all cameras of this client (connected + offline)
+const getCameraList = async (req, res, next) => {
+  try {
+    const { id: enterpriseClientId } = req.tokenPayload;
 
+    const cameras = await CameraConnection.find({ enterpriseClientId })
+      .populate("assignedEventId", "eventName slug")
+      .populate("assignedAlbumId", "albumName totalImages")
+      .sort({ isOnline: -1, lastSeenAt: -1 })
+      .lean();
 
-
-
-import { profileCompanyInfoForm } from "@/src/components/lib/photo";
-import { useRootData } from "@/src/context/rootContext";
-import useCountrySelector from "@/src/hooks/useCountryList";
-import {
-  getCountryCallingCode,
-  getExampleNumber,
-  parsePhoneNumberFromString,
-} from "libphonenumber-js";
-import examples from "libphonenumber-js/mobile/examples";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useDispatch } from "react-redux";
-import CountryDropdown from "../Common/CountryDropdown";
-import { CustomInputField } from "../forms";
-
-const CompanyInfoForm = ({ profile, onNext }) => {
-  const { ipInfo } = useRootData();
-  const dispatch = useDispatch();
-  const defaultCountryCode =
-    profile?.countryCode || ipInfo?.countryCode || "US";
-
-  const {
-    selectedCountry,
-    selectedCountryCode,
-    showCountryDropdown,
-    filteredCountries,
-    countrySearch,
-    handleCountrySelect,
-    toggleDropdown,
-    updateSearch,
-    setCountryByCode,
-  } = useCountrySelector(defaultCountryCode);
-
-  const [formData, setFormData] = useState({
-    companyName: profile?.companyName || "",
-    aboutCompany: profile?.aboutCompany || "",
-    countryCode: defaultCountryCode,
-    countryDialCode:
-      profile?.countryDialCode ||
-      `+${getCountryCallingCode(defaultCountryCode)}`,
-    mobileNumber: profile?.mobileNumber || "",
-    emailId: profile?.emailId || "",
-    websiteLink: profile?.websiteLink || "",
-    setupProgress: 1,
-  });
-
-  const [errors, setErrors] = useState({});
-
-  // Update form data when country changes
-  useEffect(() => {
-    setFormData((prev) => ({
-      ...prev,
-      countryCode: selectedCountryCode,
-      countryDialCode: selectedCountry?.dialCode || "+1",
-    }));
-  }, [selectedCountryCode, selectedCountry]);
-
-  useEffect(() => {
-    if (profile || ipInfo) {
-      const countryCode =
-        profile?.countryCode || ipInfo?.countryCode || "US";
-      const dialCode =
-        profile?.countryDialCode || `+${getCountryCallingCode(countryCode)}`;
-
-      setCountryByCode(countryCode);
-
-      const newData = {
-        companyName: profile?.companyName || "",
-        aboutCompany: profile?.aboutCompany || "",
-        countryCode,
-        countryDialCode: dialCode,
-        mobileNumber: profile?.mobileNumber || "",
-        emailId: profile?.emailId || "",
-        websiteLink: profile?.websiteLink || "",
-        setupProgress: 1,
-      };
-
-      setFormData(newData);
-    }
-  }, [profile, ipInfo, setCountryByCode]);
-
-  // Validation functions (keep your existing validation)
-  const validate = {
-    email: (email) => {
-      if (!email) return "Email is required";
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      return emailRegex.test(email) ? "" : "Invalid email format";
-    },
-    url: (url) => {
-      if (!url) return "";
-      const urlRegex =
-        /^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w \.-]*)*\/?$/;
-      return urlRegex.test(url) ? "" : "Invalid URL format";
-    },
-    phone: (phone, countryCode) => {
-      if (!phone) return "Phone number is required";
-      const phoneObj = parsePhoneNumberFromString(
-        `${formData.countryDialCode}${phone}`,
-        countryCode
-      );
-      if (!phoneObj?.isValid()) {
-        const example =
-          getExampleNumber(countryCode, examples)?.formatNational() || "";
-        return `Invalid phone number. Example: ${example}`;
-      }
-      return "";
-    },
-    text: (value, field, minLength = 2) => {
-      if (!value) return `${field} is required`;
-      if (value.length < minLength)
-        return `${field} must be at least ${minLength} characters`;
-      return "";
-    },
-  };
-
-  const handleChange = useCallback(
-    (name, e, rqd = true) => {
-      const { value } = e.target;
-      if (rqd)
-        setErrors((prev) => ({
-          ...prev,
-          [name]: value ? "" : `${name} is required`,
-        }));
-
-      setFormData((prev) => ({ ...prev, [name]: value }));
-    },
-    [errors]
-  );
-
-  const handleNext = useCallback(
-    async (e) => {
-      e.preventDefault();
-      const validErrors = {};
-      profileCompanyInfoForm.forEach(({ field, rqd = true }) => {
-        if (rqd && !formData[field]) {
-          errors[field] = `${field} is required`;
-        }
-      });
-
-      // Validate all fields
-      validErrors.companyName = validate.text(
-        formData.companyName,
-        "Company name"
-      );
-      validErrors.emailId = validate.email(formData.emailId);
-      validErrors.mobileNumber = validate.phone(
-        formData.mobileNumber,
-        formData.countryCode
-      );
-      validErrors.aboutCompany = validate.text(
-        formData.aboutCompany,
-        "About company",
-        10
-      );
-      // Remove empty errors
-      Object.keys(validErrors).forEach((key) => {
-        if (!validErrors[key]) delete validErrors[key];
-      });
-      setErrors(validErrors);
-      if (Object.keys(validErrors).length === 0) {
-        try {
-          const { updateClientProfile } = await import(
-            "@/src/redux/features/profile/profileThunks"
-          );
-          await dispatch(
-            updateClientProfile({ formData, id: profile._id, onNext })
-          );
-        } catch (error) {
-          console.error("Error saving data:", error);
-        }
-      }
-    },
-    [dispatch, formData, profile?._id, onNext]
-  );
-
-  return (
-    <form
-      onSubmit={handleNext}
-      className="grid grid-cols-1 xl:grid-cols-2 xl:gap-4 gap-3"
-    >
-      {profileCompanyInfoForm.map((item) => (
-        <div className="flex gap-2" key={item.field}>
-          {item.field === "mobileNumber" && (
-            <CountryDropdown
-              selectedCountry={selectedCountry}
-              showDropdown={showCountryDropdown}
-              filteredCountries={filteredCountries}
-              searchValue={countrySearch}
-              onToggle={toggleDropdown}
-              onCountrySelect={handleCountrySelect}
-              onSearchChange={updateSearch}
-              className="mt-6"
-            />
-          )}
-          <CustomInputField
-            {...item}
-            error={errors[item.field]}
-            value={formData[item.field]}
-            onChange={(e) => handleChange(item.field, e, item?.rqd)}
-          />
-        </div>
-      ))}
-
-      <div className="col-span-full">
-        <button
-          type="submit"
-          className="md:static fixed bottom-0 left-0 right-0 z-30 bg-primary text-white px-4 py-2 rounded hover:bg-secondary transition"
-        >
-          Next
-        </button>
-      </div>
-    </form>
-  );
+    return jsonOne(res, HTTP.SUCCESS, cameras);
+  } catch (error) {
+    next(error);
+  }
 };
 
-export default CompanyInfoForm;
+// ✅ Assign event + album to camera
+const assignEventAlbum = async (req, res, next) => {
+  try {
+    const { cameraConnectionId } = req.params;
+    const { assignedEventId, assignedAlbumId } = req.body;
+    const { id: enterpriseClientId } = req.tokenPayload;
 
+    const camera = await CameraConnection.findOneAndUpdate(
+      { _id: cameraConnectionId, enterpriseClientId },
+      { assignedEventId, assignedAlbumId },
+      { new: true },
+    )
+      .populate("assignedEventId", "eventName")
+      .populate("assignedAlbumId", "albumName");
 
-
-"use client";
-import React, { useCallback, useEffect, useState } from "react";
-import FileUpload from "@/src/components/Common/FileUpload";
-import { useDispatch } from "react-redux";
-
-const ProfilePhotoForm = ({ profile, onNext }) => {
-  const dispatch = useDispatch();
-  const MAX_FILE_SIZE_KB = 800;
-  const MIN_FILE_SIZE_KB = 5;
-
-  const [formData, setFormData] = useState({
-    profilePhoto: profile?.profilePhoto || "",
-    coverPhoto: profile?.coverPhoto || "",
-    companyName: profile?.companyName || "",
-    setupProgress: 3,
-  });
-
-  const [errors, setErrors] = useState({});
-
-  const validateFileSize = (file) => {
-    const fileSizeKB = file.size / 1024; // Convert bytes to KB
-    return fileSizeKB >= MIN_FILE_SIZE_KB && fileSizeKB <= MAX_FILE_SIZE_KB;
-  };
-
-  const handleChange = useCallback((name, e) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (!validateFileSize(file)) {
-        setErrors((prev) => ({
-          ...prev,
-          [name]: `File size must be between ${MIN_FILE_SIZE_KB}KB and ${MAX_FILE_SIZE_KB}KB`,
-        }));
-        return;
-      }
-
-      // Check file type (optional)
-      if (!file.type.match(/image.(jpeg|jpg|png|webp)/)) {
-        setErrors((prev) => ({
-          ...prev,
-          [name]: "Only JPG/JPEG/PNG/webp images are allowed",
-        }));
-        return;
-      }
-
-      setFormData((prev) => ({ ...prev, [name]: file }));
-      setErrors((prev) => ({ ...prev, [name]: "" }));
+    if (!camera) {
+      return throwHttpError("not_found", "Camera not found", HTTP.NOT_FOUND);
     }
-  }, []);
 
-  const handleRemoveProfileImage = useCallback(() => {
-    setFormData((prev) => ({ ...prev, profilePhoto: "" }));
-    setErrors((prev) => ({ ...prev, profilePhoto: "" }));
-  }, []);
-
-  const handleRemoveCoverImage = useCallback(() => {
-    setFormData((prev) => ({ ...prev, coverPhoto: "" }));
-    setErrors((prev) => ({ ...prev, coverPhoto: "" }));
-  }, []);
-
-  const handleNext = useCallback(
-    async (e) => {
-      e.preventDefault();
-      const validErrors = {};
-
-      ["profilePhoto", "coverPhoto"].forEach((field) => {
-        if (!formData[field]) {
-          validErrors[field] = `${field} is required`;
-        } else if (
-          formData[field] instanceof File &&
-          !validateFileSize(formData[field])
-        ) {
-          validErrors[
-            field
-          ] = `File size must be between ${MIN_FILE_SIZE_KB}KB and ${MAX_FILE_SIZE_KB}KB`;
-        }
-      });
-
-      setErrors(validErrors);
-      if (Object.keys(validErrors).length === 0) {
-        try {
-          const { updateClientProfilePhoto } = await import(
-            "@/src/redux/features/profile/profileThunks"
-          );
-          await dispatch(
-            updateClientProfilePhoto({ formData, id: profile._id, onNext })
-          );
-        } catch (error) {
-          console.error("Error saving data:", error);
-        }
-      }
-    },
-    [dispatch, formData, profile?._id, onNext]
-  );
-
-  useEffect(() => {
-    if (profile) {
-      setFormData({
-        profilePhoto: profile.profilePhoto || "",
-        coverPhoto: profile.coverPhoto || "",
-        companyName: profile.companyName || "",
-        setupProgress: 3,
-      });
-    }
-  }, [profile]);
-
-  return (
-    <>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 lg:gap-4">
-        {/* Profile Photo Upload */}
-        <div className="">
-          <div className="w-full">
-            <FileUpload
-              label="Profile Image"
-              name="profilePhoto"
-              files={[formData.profilePhoto]}
-              onChange={(e) => handleChange("profilePhoto", e)}
-              error={errors.profilePhoto}
-              required={true}
-              onRemove={handleRemoveProfileImage}
-              accept="image/jpeg, image/jpg, image/png"
-            />
-          </div>
-          {formData.profilePhoto instanceof File && (
-            <p className="text-xs text-gray-500 mt-2">
-              Size: {(formData.profilePhoto.size / 1024).toFixed(2)}KB
-            </p>
-          )}
-        </div>
-
-        {/* Cover Photo Upload */}
-        <div className="">
-          <div className="h-56">
-            <FileUpload
-              label="Cover Image"
-              name="coverPhoto"
-              files={[formData.coverPhoto]}
-              onChange={(e) => handleChange("coverPhoto", e)}
-              error={errors.coverPhoto}
-              required={true}
-              onRemove={handleRemoveCoverImage}
-              accept="image/jpeg, image/jpg, image/png"
-            />
-          </div>
-          {formData.coverPhoto instanceof File && (
-            <p className="text-xs text-gray-500 mt-2">
-              Size: {(formData.coverPhoto.size / 1024).toFixed(2)}KB
-            </p>
-          )}
-        </div>
-      </div>
-
-      <button
-        onClick={handleNext}
-        type="button"
-        className="md:static fixed bottom-0 left-0 right-0 z-30 bg-primary text-white px-4 py-2 mt-3 rounded hover:bg-secondary transition"
-      >
-        Next
-      </button>
-    </>
-  );
-};
-
-export default ProfilePhotoForm;
-
-import useCountrySelector from "@/src/hooks/useCountryList";
-import { parsePhoneNumberFromString } from "libphonenumber-js";
-import { useEffect, useState } from "react";
-import { useDispatch } from "react-redux";
-import CountryDropdown from "../Common/CountryDropdown";
-import { CustomInputField } from "../forms";
-import { profileSocialLinkForm } from "../lib/photo";
-
-function SocialLink({ profile, onNext }) {
-  const dispatch = useDispatch();
-  const {
-    selectedCountry,
-    selectedCountryCode,
-    showCountryDropdown,
-    filteredCountries,
-    countrySearch,
-    handleCountrySelect,
-    toggleDropdown,
-    updateSearch,
-    setCountryByCode,
-  } = useCountrySelector("IN");
-
-  const [formData, setFormData] = useState({
-    fb: "",
-    instagram: "",
-    x: "",
-    youTube: "",
-    whatsapp: "",
-    pinterest: "",
-    behance: "",
-    setupProgress: 4,
-    isSetupComplete: true,
-  });
-
-  const [errors, setErrors] = useState({});
-
-  useEffect(() => {
-    if (profile) {
-      // Parse existing WhatsApp number if it exists
-      let whatsappNumber = profile.whatsapp || "";
-      let countryCode = "IN";
-
-      if (whatsappNumber) {
-        // Try to parse the existing WhatsApp number
-        try {
-          const parsed = parsePhoneNumberFromString(
-            whatsappNumber.startsWith("+")
-              ? whatsappNumber
-              : `+${whatsappNumber}`,
-          );
-          if (parsed) {
-            countryCode = parsed.country;
-            whatsappNumber = parsed.nationalNumber;
-          }
-        } catch (error) {
-          console.log("Could not parse existing WhatsApp number");
-        }
-      }
-
-      setCountryByCode(countryCode);
-
-      setFormData({
-        fb: profile.fb || "",
-        instagram: profile.instagram || "",
-        x: profile.x || "",
-        youTube: profile.youTube || "",
-        whatsapp: whatsappNumber,
-        pinterest: profile.pinterest || "",
-        behance: profile.behance || "",
-        setupProgress: 4,
-        isSetupComplete: true,
-      });
-    }
-  }, [profile, setCountryByCode]);
-
-  const validateWhatsAppNumber = (number, countryCode) => {
-    if (!number) return "";
-
-    try {
-      const fullNumber = `${selectedCountry?.dialCode}${number}`;
-      const parsed = parsePhoneNumberFromString(fullNumber, countryCode);
-      if (!parsed || !parsed.isValid()) {
-        return "Invalid WhatsApp number format";
-      }
-      return "";
-    } catch (error) {
-      return "Invalid WhatsApp number";
-    }
-  };
-
-  const handleChange = (name, e) => {
-    const { value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
-
-    // Clear errors for the field being edited
-    setErrors((prev) => {
-      const newErrors = { ...prev };
-      delete newErrors[name];
-      return newErrors;
+    // ✅ Emit update to dashboard
+    const io = getIO();
+    io.to(`client_${enterpriseClientId}`).emit("camera_updated", {
+      cameraConnectionId,
+      assignedEventId: camera.assignedEventId,
+      assignedAlbumId: camera.assignedAlbumId,
     });
-  };
 
-  const handleSave = async (e) => {
-    e.preventDefault();
-    const newErrors = {};
+    return jsonOne(res, HTTP.SUCCESS, camera);
+  } catch (error) {
+    next(error);
+  }
+};
 
-    // Validate WhatsApp number
-    if (formData.whatsapp) {
-      const whatsappError = validateWhatsAppNumber(
-        formData.whatsapp,
-        selectedCountryCode,
-      );
-      if (whatsappError) newErrors.whatsapp = whatsappError;
+// ✅ Enable / Disable upload toggle
+const toggleCameraUpload = async (req, res, next) => {
+  try {
+    const { cameraConnectionId } = req.params;
+    const { id: enterpriseClientId } = req.tokenPayload;
+
+    const camera = await CameraConnection.findOne({
+      _id: cameraConnectionId,
+      enterpriseClientId,
+    });
+
+    if (!camera) {
+      return throwHttpError("not_found", "Camera not found", HTTP.NOT_FOUND);
     }
 
-    setErrors(newErrors);
+    camera.isUploadEnabled = !camera.isUploadEnabled;
+    await camera.save();
 
-    if (Object.keys(newErrors).length === 0) {
-      try {
-        // Format WhatsApp number for saving (international format without +)
-        const finalFormData = { ...formData };
-        if (formData.whatsapp) {
-          const fullWhatsAppNumber =
-            `${selectedCountry?.dialCode}${formData.whatsapp}`.replace("+", "");
-          finalFormData.whatsapp = fullWhatsAppNumber;
-        }
+    // ✅ Emit toggle to dashboard
+    const io = getIO();
+    io.to(`client_${enterpriseClientId}`).emit("camera_updated", {
+      cameraConnectionId,
+      isUploadEnabled: camera.isUploadEnabled,
+    });
 
-        const { updateClientProfile } =
-          await import("@/src/redux/features/profile/profileThunks");
-        await dispatch(
-          updateClientProfile({
-            formData: finalFormData,
-            id: profile._id,
-            onNext,
-          }),
-        );
-      } catch (error) {
-        console.error("Error saving data:", error);
-        setErrors({
-          general: "Failed to save social links. Please try again.",
-        });
-      }
-    }
-  };
+    return jsonOne(res, HTTP.SUCCESS, {
+      cameraConnectionId,
+      isUploadEnabled: camera.isUploadEnabled,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 
-  return (
-    <form onSubmit={handleSave} className="flex flex-col gap-4">
-      {/* General Error */}
-      {errors.general && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
-          <div className="flex items-center">
-            <svg
-              className="w-4 h-4 mr-2"
-              fill="currentColor"
-              viewBox="0 0 20 20"
-            >
-              <path
-                fillRule="evenodd"
-                d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
-                clipRule="evenodd"
-              />
-            </svg>
-            {errors.general}
-          </div>
-        </div>
-      )}
+// ✅ Delete camera token
+const deleteCameraToken = async (req, res, next) => {
+  try {
+    const { tokenId } = req.params;
+    const { id: enterpriseClientId } = req.tokenPayload;
 
-      {/* Regular Social Media Fields */}
-      {profileSocialLinkForm
-        .filter((item) => item.field !== "whatsapp")
-        .map((item) => (
-          <CustomInputField
-            {...item}
-            key={item.field}
-            value={formData[item.field]}
-            onChange={(e) => handleChange(item.field, e)}
-            error={errors[item.field]}
-          />
-        ))}
+    await CameraToken.findOneAndUpdate(
+      { _id: tokenId, enterpriseClientId },
+      { deletedAt: new Date(), status: AccountStatus.DEACTIVE },
+    );
 
-      {/* WhatsApp Number with Country Selector */}
-      <div className="space-y-2">
-        <label className="block text-sm font-medium text-gray-700">
-          WhatsApp Number
-        </label>
-        <div className="flex space-x-2">
-          <CountryDropdown
-            selectedCountry={selectedCountry}
-            showDropdown={showCountryDropdown}
-            filteredCountries={filteredCountries}
-            searchValue={countrySearch}
-            onToggle={toggleDropdown}
-            onCountrySelect={handleCountrySelect}
-            onSearchChange={updateSearch}
-            buttonClassName="rounded-lg"
-          />
+    await CameraConnection.findOneAndUpdate(
+      { cameraTokenId: tokenId },
+      { isOnline: false },
+    );
 
-          {/* WhatsApp Number Input */}
-          <input
-            type="tel"
-            placeholder="Enter WhatsApp number"
-            value={formData.whatsapp}
-            onChange={(e) => handleChange("whatsapp", e)}
-            className={`flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary ${
-              errors.whatsapp ? "border-red-500" : "border-gray-300"
-            }`}
-          />
-        </div>
+    return jsonOne(res, HTTP.SUCCESS, {}, "Camera removed");
+  } catch (error) {
+    next(error);
+  }
+};
 
-        {errors.whatsapp && (
-          <p className="text-red-600 text-sm">{errors.whatsapp}</p>
-        )}
-      </div>
+export default {
+  createCameraToken,
+  getCameraList,
+  assignEventAlbum,
+  toggleCameraUpload,
+  deleteCameraToken,
+};
 
-      {/* Submit Button */}
-      <button
-        type="submit"
-        disabled={Object.keys(errors).length > 0}
-        className="w-full md:static fixed bottom-0 left-0 right-0 z-30 bg-primary text-white px-6 py-3 rounded-lg hover:bg-secondary transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium mt-3"
-      >
-        {Object.keys(errors).length > 0
-          ? "Fix Errors to Continue"
-          : "Save Social Links"}
-      </button>
-    </form>
+
+
+import { Router } from "express";
+import { cameraController } from "../../../controller/client/index.js";
+import auth from "../../../middlewares/authMiddleware.js";
+import permit from "../../../middlewares/permissionMiddleware.js";
+import validate from "../../../middlewares/validationMiddleware.js";
+import { clientRole } from "../../../utils/generalUtils.js";
+import { validateCookie } from "../../../validators/authValidator.js";
+import { resourceIds } from "../../../validators/generalValidators.js";
+import { requiredTextField } from "../../../validators/venueValidators.js";
+
+const _router = Router({
+  mergeParams: true,
+});
+
+/** Get All cameras */
+_router
+  .route("/fetchAll")
+  .get(
+    validate([validateCookie("client_session")]),
+    auth,
+    permit(clientRole),
+    cameraController.getCameraList,
   );
-}
 
-export default SocialLink;
+/** generate FTP creds  */
+_router
+  .route("/token")
+  .post(
+    validate([
+      validateCookie("client_session"),
+      requiredTextField("tokenName", "Token Name"),
+    ]),
+    auth,
+    permit(clientRole),
+    cameraController.createCameraToken,
+  );
 
+/** assign event+album  */
+_router
+  .route("/:cameraConnectionId/assign")
+  .patch(
+    validate([
+      validateCookie("client_session"),
+      resourceIds("cameraConnectionId", "param"),
+      resourceIds("assignedEventId", "body"),
+      resourceIds("assignedAlbumId", "body"),
+    ]),
+    auth,
+    permit(clientRole),
+    cameraController.assignEventAlbum,
+  );
 
+/*** enable/disable ***/
+_router
+  .route("/:cameraConnectionId/toggle")
+  .patch(
+    validate([
+      validateCookie("client_session"),
+      resourceIds("cameraConnectionId", "param"),
+    ]),
+    auth,
+    permit(clientRole),
+    cameraController.toggleCameraUpload,
+  );
 
-const profileCompanyInfoForm = [
-  {
-    field: "companyName",
-    type: "text",
-    placeholder: "Company Name",
-    css: "",
-    icon: HiOutlineBuildingOffice2,
-    rqd: true,
-  },
-  {
-    field: "mobileNumber",
-    type: "number",
-    placeholder: "Mobile Number",
-    css: "",
-    rqd: true,
-  },
-  {
-    field: "emailId",
-    type: "email",
-    placeholder: "email Id",
-    css: "",
-    icon: BsEnvelopeAt,
-    rqd: true,
-  },
-  {
-    field: "websiteLink",
-    type: "url",
-    placeholder: "Website Link",
-    css: "",
-    icon: TbWorldWww,
-    rqd: false,
-  },
-  {
-    field: "aboutCompany",
-    type: "textarea",
-    placeholder: "About Company",
-    css: "xl:col-span-2",
-    icon: HiOutlineBuildingOffice2,
-    rqd: true,
-  },
-];
+/** delete token */
+_router
+  .route("/token/:tokenId")
+  .delete(
+    validate([
+      validateCookie("client_session"),
+      resourceIds("tokenId", "param"),
+    ]),
+    auth,
+    permit(clientRole),
+    cameraController.deleteCameraToken,
+  );
 
-const profileSocialLinkForm = [
-  {
-    field: "fb",
-    type: "url",
-    placeholder: "Facebook",
-    css: "col-span-3",
-    icon: RiFacebookCircleLine,
-    rqd: false,
-  },
-  {
-    field: "instagram",
-    type: "url",
-    placeholder: "Instagram",
-    css: "col-span-3",
-    icon: FaInstagram,
-    rqd: true,
-  },
-  {
-    field: "x",
-    type: "url",
-    placeholder: "X (Twitter)",
-    css: "row-start-2",
-    icon: FaXTwitter,
-    rqd: false,
-  },
-  {
-    field: "youTube",
-    type: "url",
-    placeholder: "YouTube",
-    css: "row-start-2",
-    icon: PiYoutubeLogo,
-    rqd: false,
-  },
-  {
-    field: "pinterest",
-    type: "url",
-    placeholder: "Pinterest",
-    css: "col-span-3 row-start-3",
-    icon: ImPinterest2,
-    rqd: false,
-  },
-  {
-    field: "behance",
-    type: "url",
-    placeholder: "Behance",
-    css: "col-span-3 row-start-3",
-    icon: PiBehanceLogo,
-    rqd: false,
-  },
-];
-
+export const router = _router;
