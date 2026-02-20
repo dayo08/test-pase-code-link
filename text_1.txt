@@ -552,3 +552,293 @@ function CameraCard({
     </div>
   );
 }
+
+
+
+
+import { createSlice } from "@reduxjs/toolkit";
+import {
+  fetchCameras,
+  createCameraToken,
+  assignCameraEventAlbum,
+  toggleCameraUpload,
+  deleteCameraToken,
+} from "./camerasThunks";
+
+const initialState = {
+  cameras: [],
+  newCredentials: null,
+  loading: false,
+  actionLoading: false,
+  error: null,
+};
+
+const cameraSlice = createSlice({
+  name: "camera",
+  initialState,
+  reducers: {
+    clearError: (state) => {
+      state.error = null;
+    },
+    clearNewCredentials: (state) => {
+      state.newCredentials = null;
+    },
+
+    socketCameraConnected: (state, { payload }) => {
+      const id = payload.cameraConnectionId?.toString();
+      const exists = state.cameras.find((c) => c._id === id);
+      if (exists) {
+        state.cameras = state.cameras.map((c) =>
+          c._id === id
+            ? {
+                ...c,
+                isOnline: true,
+                connectedAt: payload.connectedAt,
+                cameraIP: payload.cameraIP,
+              }
+            : c,
+        );
+      } else {
+        state.cameras = [{ _id: id, ...payload }, ...state.cameras];
+      }
+    },
+
+    socketCameraDisconnected: (state, { payload }) => {
+      const id = payload.cameraConnectionId?.toString();
+      state.cameras = state.cameras.map((c) =>
+        c._id === id
+          ? { ...c, isOnline: false, disconnectedAt: payload.disconnectedAt }
+          : c,
+      );
+    },
+
+    socketCameraUpdated: (state, { payload }) => {
+      const id = payload.cameraConnectionId?.toString();
+      state.cameras = state.cameras.map((c) =>
+        c._id === id ? { ...c, ...payload } : c,
+      );
+    },
+  },
+
+  extraReducers: (builder) => {
+    builder
+      // ─── Fetch All ─────────────────────────────────────
+      .addCase(fetchCameras.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(fetchCameras.fulfilled, (state, action) => {
+        state.cameras = action.payload || [];
+        state.loading = false;
+      })
+      .addCase(fetchCameras.rejected, (state, action) => {
+        state.error = action.payload;
+        state.loading = false;
+      })
+
+      // ─── Create Token ───────────────────────────────────
+      .addCase(createCameraToken.pending, (state) => {
+        state.actionLoading = true;
+        state.error = null;
+      })
+      .addCase(createCameraToken.fulfilled, (state, action) => {
+        state.newCredentials = action.payload;
+
+        // Backend now returns connectionId — use it as _id
+        if (action.payload?.connectionId) {
+          const newCamera = {
+            _id: action.payload.connectionId,
+            cameraTokenId: action.payload.cameraTokenId,
+            tokenName: action.payload.tokenName,
+            isOnline: false,
+            isUploadEnabled: true,
+            totalUploaded: 0,
+            assignedEventId: null,
+            assignedAlbumId: null,
+            cameraIP: null,
+          };
+          state.cameras = [newCamera, ...state.cameras];
+        }
+        state.actionLoading = false;
+      })
+      .addCase(createCameraToken.rejected, (state, action) => {
+        state.error = action.payload;
+        state.actionLoading = false;
+      })
+
+      // ─── Assign Event/Album ─────────────────────────────
+      .addCase(assignCameraEventAlbum.pending, (state) => {
+        state.actionLoading = true;
+        state.error = null;
+      })
+      .addCase(assignCameraEventAlbum.fulfilled, (state, action) => {
+        state.cameras = state.cameras.map((c) =>
+          c._id === action.payload._id ? { ...c, ...action.payload } : c,
+        );
+        state.actionLoading = false;
+      })
+      .addCase(assignCameraEventAlbum.rejected, (state, action) => {
+        state.error = action.payload;
+        state.actionLoading = false;
+      })
+
+      // ─── Toggle Upload ──────────────────────────────────
+      .addCase(toggleCameraUpload.pending, (state) => {
+        state.actionLoading = true;
+      })
+      .addCase(toggleCameraUpload.fulfilled, (state, action) => {
+        state.cameras = state.cameras.map((c) =>
+          c._id === action.payload.cameraConnectionId
+            ? { ...c, isUploadEnabled: action.payload.isUploadEnabled }
+            : c,
+        );
+        state.actionLoading = false;
+      })
+      .addCase(toggleCameraUpload.rejected, (state, action) => {
+        state.error = action.payload;
+        state.actionLoading = false;
+      })
+
+      // ─── Delete Token ───────────────────────────────────
+      .addCase(deleteCameraToken.pending, (state) => {
+        state.actionLoading = true;
+        state.error = null;
+      })
+      .addCase(deleteCameraToken.fulfilled, (state, action) => {
+        // ✅ Remove by tokenId OR _id (whichever matches)
+        state.cameras = state.cameras.filter(
+          (c) =>
+            c.cameraTokenId?.toString() !== action.payload &&
+            c._id?.toString() !== action.payload,
+        );
+        state.actionLoading = false;
+      })
+      .addCase(deleteCameraToken.rejected, (state, action) => {
+        state.error = action.payload;
+        state.actionLoading = false;
+      });
+  },
+});
+
+export const {
+  clearError,
+  clearNewCredentials,
+  socketCameraConnected,
+  socketCameraDisconnected,
+  socketCameraUpdated,
+} = cameraSlice.actions;
+
+export default cameraSlice.reducer;
+
+
+
+// redux/features/camera/camerasThunks.js
+
+import {
+  createItemJson,
+  deleteItem,
+  fetchData,
+  updateItemJson,
+} from "@/src/api/endpoint";
+import { createAsyncThunk } from "@reduxjs/toolkit";
+
+const ENDPOINTS = {
+  FETCH_ALL: "camera/fetchAll",
+  CREATE_TOKEN: "camera/token",
+  ASSIGN: "camera/assign",
+  TOGGLE: "camera/toggle",
+  DELETE_TOKEN: "camera/token",
+};
+
+const ERROR_MESSAGES = {
+  FETCH: "Failed to fetch cameras",
+  CREATE_TOKEN: "Failed to create camera token",
+  ASSIGN: "Failed to assign event/album",
+  TOGGLE: "Failed to toggle camera upload",
+  DELETE: "Failed to delete camera token",
+};
+
+// ✅ Fetch all cameras for client
+export const fetchCameras = createAsyncThunk(
+  "camera/fetchAll",
+  async (params, { rejectWithValue }) => {
+    try {
+      const { data } = await fetchData({
+        endpoint: ENDPOINTS.FETCH_ALL,
+        ...params,
+      });
+      return data;
+    } catch (error) {
+      return rejectWithValue(error.message || ERROR_MESSAGES.FETCH);
+    }
+  },
+);
+
+// ✅ Generate FTP credentials (add new camera)
+export const createCameraToken = createAsyncThunk(
+  "camera/createToken",
+  async ({ formData }, { rejectWithValue }) => {
+    try {
+      const data = await createItemJson({
+        endpoint: ENDPOINTS.CREATE_TOKEN,
+        formData,
+      });
+      if (data) return data;
+    } catch (error) {
+      return rejectWithValue(error.message || ERROR_MESSAGES.CREATE_TOKEN);
+    }
+  },
+);
+
+// ✅ Assign event + album to camera
+export const assignCameraEventAlbum = createAsyncThunk(
+  "camera/assign",
+  async ({ formData }, { rejectWithValue }) => {
+    try {
+      const data = await updateItemJson({
+        endpoint: ENDPOINTS.ASSIGN,
+        formData,
+        id: formData.cameraConnectionId,
+      });
+      if (data) return data;
+    } catch (error) {
+      return rejectWithValue(error.message || ERROR_MESSAGES.ASSIGN);
+    }
+  },
+);
+
+// ✅ Toggle enable/disable upload
+export const toggleCameraUpload = createAsyncThunk(
+  "camera/toggle",
+  async ({ cameraConnectionId }, { rejectWithValue }) => {
+    try {
+      const data = await updateItemJson({
+        endpoint: ENDPOINTS.TOGGLE,
+        formData: {},
+        id: cameraConnectionId,
+      });
+      if (data) return data;
+    } catch (error) {
+      return rejectWithValue(error.message || ERROR_MESSAGES.TOGGLE);
+    }
+  },
+);
+
+// ✅ Delete camera token
+export const deleteCameraToken = createAsyncThunk(
+  "camera/deleteToken",
+  async ({ id, setShowDeleteModal }, { rejectWithValue }) => {
+    try {
+      const data = await deleteItem({
+        endpoint: ENDPOINTS.DELETE_TOKEN,
+        id,
+      });
+      if (data) {
+        setShowDeleteModal(false);
+        return id;
+      }
+    } catch (error) {
+      return rejectWithValue(error.message || ERROR_MESSAGES.DELETE);
+    }
+  },
+);
