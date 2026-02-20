@@ -1,174 +1,250 @@
-import crypto from "crypto";
-import CameraToken from "../../models/enterprise/cameraToken.js";
-import CameraConnection from "../../models/enterprise/cameraConnection.js";
-import config from "../../config/config.js";
-import { jsonOne, throwHttpError } from "../../utils/generalUtils.js";
-import HTTP from "../../constants/httpStatusCodes.js";
-import { getIO } from "../../socket/socket.js";
-import { AccountStatus } from "../../utils/enums/index.js";
+import FtpSrv from "ftp-srv";
+import path from "path";
+import fs from "fs";
+import os from "os";
+import CameraToken from "../models/enterprise/cameraToken.js";
+import CameraConnection from "../models/enterprise/cameraConnection.js";
+import { getIO } from "../socket/socket.js"; // socket.io instance
+import Logging from "../library/Logging.js";
+import config from "../config/config.js";
+import { AccountStatus } from "../utils/enums/index.js";
 
-// ✅ Generate new camera token (photographer does this once per camera)
-const createCameraToken = async (req, res, next) => {
-  try {
-    const { id: enterpriseClientId } = req.tokenPayload;
-    const { tokenName } = req.body; // e.g. "Canon R5 - Main Camera"
+const TEMP_DIR = path.join(os.tmpdir(), "camera-uploads");
+if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
 
-    // Generate unique FTP credentials
-    const ftpUsername = `cam_${crypto.randomBytes(6).toString("hex")}`; // cam_a3f9b2c1d4e5
-    const ftpPassword = crypto.randomBytes(8).toString("hex"); // b2c1d4e5f6a7b8c9
+// ✅ LOCAL:  FTP_HOST=127.0.0.1  FTP_PASV_URL=127.0.0.1
+// ✅ VPS:    FTP_HOST=0.0.0.0    FTP_PASV_URL=YOUR_PUBLIC_IP
+const FTP_HOST = config.ftp.host;
+const FTP_PORT = parseInt(config.ftp.port);
+const FTP_PASV_URL = config.ftp.pasvUrl;
+const FTP_PASV_MIN = config.ftp.pasvMin;
+const FTP_PASV_MAX = config.ftp.pasvMax;
 
-    const token = await CameraToken.create({
-      enterpriseClientId,
-      tokenName,
-      ftpUsername,
-      ftpPassword,
-    });
+const ftpServer = new FtpSrv(`ftp://${FTP_HOST}:${FTP_PORT}`, {
+  pasv_url: FTP_PASV_URL,
+  pasv_min: FTP_PASV_MIN,
+  pasv_max: FTP_PASV_MAX,
+  anonymous: false,
+  greeting: ["FindMyPhotos Camera Upload Server"],
+  timeout: 0,
+});
 
-    const connection = await CameraConnection.create({
-      enterpriseClientId,
-      cameraTokenId: token._id,
-      tokenName: token.tokenName,
-      isOnline: false,
-      isUploadEnabled: true,
-      totalUploaded: 0,
-    });
+// ✅ Track active connections: Map<connectionId, {cameraConnectionId, enterpriseClientId}>
+const activeConnections = new Map();
 
-    return jsonOne(res, HTTP.SUCCESS, {
-      connectionId: connection._id,
-      cameraTokenId: token._id,
-      tokenName: token.tokenName,
-      isOnline: false,
-      isUploadEnabled: true,
-      totalUploaded: 0,
-      assignedEventId: null,
-      assignedAlbumId: null,
-      ftpCredentials: {
-        host: config.ftp.publicHost,
-        port: config.ftp.port,
-        username: ftpUsername,
-        password: ftpPassword,
-      },
-      cameraSetupGuide: {
-        canon:
-          "Menu → Network → FTP Transfer Settings → enter host/port/user/pass",
-        nikon: "Menu → Network → Connect to FTP Server → enter credentials",
-        sony: "Menu → Network → FTP Transfer Func → Server Settings",
-        fujifilm: "Menu → Wireless Settings → FTP Uploading → Server Settings",
-      },
-    });
-  } catch (error) {
-    next(error);
-  }
-};
+ftpServer.on(
+  "login",
+  async ({ connection, username, password }, resolve, reject) => {
+    try {
+      // 1. Validate camera token
+      const cameraToken = await CameraToken.findOne({
+        ftpUsername: username,
+        ftpPassword: password,
+        status: AccountStatus.ACTIVATE,
+        deletedAt: null,
+      });
 
-// ✅ Get all cameras of this client (connected + offline)
-const getCameraList = async (req, res, next) => {
-  try {
-    const { id: enterpriseClientId } = req.tokenPayload;
+      if (!cameraToken) {
+        Logging.warn(`❌ FTP Login failed: unknown token "${username}"`);
+        return reject(new Error("Invalid camera credentials"));
+      }
 
-    const cameras = await CameraConnection.find({ enterpriseClientId })
-      .populate("assignedEventId", "eventName slug")
-      .populate("assignedAlbumId", "albumName totalImages")
-      .sort({ isOnline: -1, lastSeenAt: -1 })
-      .lean();
+      // 2. Get camera IP
+      const cameraIP = connection.ip || "unknown";
 
-    return jsonOne(res, HTTP.SUCCESS, cameras);
-  } catch (error) {
-    next(error);
-  }
-};
+      // 3. Upsert camera connection record
+      const cameraConn = await CameraConnection.findOneAndUpdate(
+        { cameraTokenId: cameraToken._id },
+        {
+          enterpriseClientId: cameraToken.enterpriseClientId,
+          cameraTokenId: cameraToken._id,
+          tokenName: cameraToken.tokenName,
+          cameraIP,
+          isOnline: true,
+          connectedAt: new Date(),
+          lastSeenAt: new Date(),
+          disconnectedAt: null,
+        },
+        { upsert: true, new: true },
+      );
 
-// ✅ Assign event + album to camera
-const assignEventAlbum = async (req, res, next) => {
-  try {
-    const { cameraConnectionId } = req.params;
-    const { assignedEventId, assignedAlbumId } = req.body;
-    const { id: enterpriseClientId } = req.tokenPayload;
+      // 4. Track this FTP connection
+      const connId = connection.id || Date.now().toString();
+      activeConnections.set(connId, {
+        cameraConnectionId: cameraConn._id,
+        enterpriseClientId: cameraToken.enterpriseClientId.toString(),
+        cameraTokenId: cameraToken._id,
+      });
 
-    const camera = await CameraConnection.findOneAndUpdate(
-      { _id: cameraConnectionId, enterpriseClientId },
-      { assignedEventId, assignedAlbumId },
-      { new: true },
-    )
-      .populate("assignedEventId", "eventName")
-      .populate("assignedAlbumId", "albumName");
+      // 5. ✅ Emit socket event → dashboard updates in real time
+      const io = getIO();
+      io.to(`client_${cameraToken.enterpriseClientId}`).emit(
+        "camera_connected",
+        {
+          cameraConnectionId: cameraConn._id,
+          tokenName: cameraToken.tokenName,
+          cameraIP,
+          isOnline: true,
+          isUploadEnabled: cameraConn.isUploadEnabled,
+          assignedEventId: cameraConn.assignedEventId,
+          assignedAlbumId: cameraConn.assignedAlbumId,
+          connectedAt: cameraConn.connectedAt,
+        },
+      );
 
-    if (!camera) {
-      return throwHttpError("not_found", "Camera not found", HTTP.NOT_FOUND);
+      Logging.success(
+        `📷 Camera connected: "${cameraToken.tokenName}" (${cameraIP}) → Client: ${cameraToken.enterpriseClientId}`,
+      );
+
+      // 6. Set temp dir for this camera
+      const camTempDir = path.join(TEMP_DIR, cameraConn._id.toString());
+      if (!fs.existsSync(camTempDir))
+        fs.mkdirSync(camTempDir, { recursive: true });
+
+      resolve({ fs: camTempDir, root: camTempDir });
+
+      // ✅ 7. STOR event — fires every time camera sends a photo
+      connection.on("STOR", async (error, filePath) => {
+        if (error) {
+          Logging.error("FTP STOR error:", error.message);
+          return;
+        }
+
+        const tracked = activeConnections.get(connId);
+        if (!tracked) return;
+
+        Logging.info(
+          `📸 New file received from camera: ${path.basename(filePath)}`,
+        );
+
+        // ✅ Check if upload is enabled for this camera
+        const camState = await CameraConnection.findById(
+          tracked.cameraConnectionId,
+        )
+          .select("isUploadEnabled assignedEventId assignedAlbumId")
+          .lean();
+
+        if (!camState?.isUploadEnabled) {
+          Logging.warn(
+            `⏸️ Upload disabled for camera — skipping: ${path.basename(filePath)}`,
+          );
+
+          // Delete temp file if upload disabled
+          if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+          return;
+        }
+
+        if (!camState?.assignedEventId || !camState?.assignedAlbumId) {
+          Logging.warn(
+            `⚠️ No event/album assigned — skipping: ${path.basename(filePath)}`,
+          );
+          if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+          return;
+        }
+
+        // 📌 Upload processing will be added here in next step
+        // processCameraUpload({ filePath, ...tracked, ...camState })
+        Logging.info(`✅ File ready for processing: ${filePath}`);
+      });
+
+      // ✅ 8. Listen for disconnect
+      connection.on("close", async () => {
+        const tracked = activeConnections.get(connId);
+        if (!tracked) return;
+
+        await CameraConnection.findByIdAndUpdate(tracked.cameraConnectionId, {
+          isOnline: false,
+          disconnectedAt: new Date(),
+          lastSeenAt: new Date(),
+        });
+
+        const io = getIO();
+        io.to(`client_${tracked.enterpriseClientId}`).emit(
+          "camera_disconnected",
+          {
+            cameraConnectionId: tracked.cameraConnectionId,
+            isOnline: false,
+            disconnectedAt: new Date(),
+          },
+        );
+
+        activeConnections.delete(connId);
+        Logging.success(`📷 Camera disconnected: "${cameraToken.tokenName}"`);
+      });
+    } catch (error) {
+      Logging.error("FTP login error:", error.message);
+      reject(new Error("Server error during authentication"));
     }
+  },
+);
 
-    // ✅ Emit update to dashboard
-    const io = getIO();
-    io.to(`client_${enterpriseClientId}`).emit("camera_updated", {
-      cameraConnectionId,
-      assignedEventId: camera.assignedEventId,
-      assignedAlbumId: camera.assignedAlbumId,
+ftpServer.on("client-error", ({ connection, error }) => {
+  Logging.error("FTP Client Error:", error.message);
+});
+
+export const startFtpServer = () => {
+  ftpServer
+    .listen()
+    .then(() => {
+      Logging.success(`📷 FTP Camera Server → ftp://${FTP_HOST}:${FTP_PORT}`);
+      Logging.success(`📡 Passive mode IP: ${FTP_PASV_URL}`);
+    })
+    .catch((err) => {
+      Logging.error("❌ FTP Server failed to start:", err.message);
     });
-
-    return jsonOne(res, HTTP.SUCCESS, camera);
-  } catch (error) {
-    next(error);
-  }
 };
 
-// ✅ Enable / Disable upload toggle
-const toggleCameraUpload = async (req, res, next) => {
-  try {
-    const { cameraConnectionId } = req.params;
-    const { id: enterpriseClientId } = req.tokenPayload;
+export { activeConnections };
+export default ftpServer;
 
-    const camera = await CameraConnection.findOne({
-      _id: cameraConnectionId,
-      enterpriseClientId,
+
+
+
+// src/socket/socket.js
+import { Server } from "socket.io";
+import config from "../config/config.js";
+import Logging from "../library/Logging.js";
+
+let io = null;
+
+export const initSocket = (httpServer) => {
+  const allowedOrigins = config.origin.split(",");
+
+  io = new Server(httpServer, {
+    cors: {
+      origin: allowedOrigins,
+      credentials: true,
+      methods: ["GET", "POST"],
+    },
+    transports: ["websocket", "polling"],
+  });
+
+  io.on("connection", (socket) => {
+    Logging.info(`🔌 Socket connected: ${socket.id}`);
+
+    // ✅ Client joins their own room to receive camera events
+    socket.on("join_client_room", ({ enterpriseClientId }) => {
+      if (!enterpriseClientId) return;
+      socket.join(`client_${enterpriseClientId}`);
+      Logging.info(`📷 Camera room joined: client_${enterpriseClientId}`);
     });
 
-    if (!camera) {
-      return throwHttpError("not_found", "Camera not found", HTTP.NOT_FOUND);
-    }
-
-    camera.isUploadEnabled = !camera.isUploadEnabled;
-    await camera.save();
-
-    // ✅ Emit toggle to dashboard
-    const io = getIO();
-    io.to(`client_${enterpriseClientId}`).emit("camera_updated", {
-      cameraConnectionId,
-      isUploadEnabled: camera.isUploadEnabled,
+    socket.on("disconnect", (reason) => {
+      Logging.info(`🔌 Socket disconnected: ${socket.id} (${reason})`);
     });
 
-    return jsonOne(res, HTTP.SUCCESS, {
-      cameraConnectionId,
-      isUploadEnabled: camera.isUploadEnabled,
+    socket.on("error", (err) => {
+      Logging.error(`🔌 Socket error: ${err.message}`);
     });
-  } catch (error) {
-    next(error);
-  }
+  });
+
+  Logging.info("✅ Socket.IO initialized");
+  return io;
 };
 
-// ✅ Delete camera token
-const deleteCameraToken = async (req, res, next) => {
-  try {
-    const { tokenId } = req.params;
-    const { id: enterpriseClientId } = req.tokenPayload;
-
-    await CameraToken.findOneAndUpdate(
-      { _id: tokenId, enterpriseClientId },
-      { deletedAt: new Date(), status: AccountStatus.DEACTIVE },
-    );
-
-    // ✅ Also delete the connection record so it's removed from list
-    await CameraConnection.findOneAndDelete({ cameraTokenId: tokenId });
-
-    return jsonOne(res, HTTP.SUCCESS, {}, "Camera removed");
-  } catch (error) {
-    next(error);
-  }
+export const getIO = () => {
+  if (!io) throw new Error("Socket.IO not initialized yet");
+  return io;
 };
 
-export default {
-  createCameraToken,
-  getCameraList,
-  assignEventAlbum,
-  toggleCameraUpload,
-  deleteCameraToken,
-};
+export default { initSocket, getIO };
