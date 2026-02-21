@@ -1,184 +1,168 @@
-import crypto from "crypto";
-import CameraToken from "../../models/enterprise/cameraToken.js";
-import CameraConnection from "../../models/enterprise/cameraConnection.js";
-import config from "../../config/config.js";
-import { jsonOne, throwHttpError } from "../../utils/generalUtils.js";
-import HTTP from "../../constants/httpStatusCodes.js";
-import { getIO } from "../../socket/socket.js";
-import { AccountStatus } from "../../utils/enums/index.js";
-import { updateCameraState } from "../../ftp/ftpServer.js";
+import {
+  FieldWrapper,
+  FileInput,
+  SelectInput,
+  TextareaInput,
+  TextInput,
+} from ".";
 
-// ✅ Generate new camera token (photographer does this once per camera)
-const createCameraToken = async (req, res, next) => {
-  try {
-    const { id: enterpriseClientId } = req.tokenPayload;
-    const { tokenName } = req.body; // e.g. "Canon R5 - Main Camera"
-
-    // Generate unique FTP credentials
-    const ftpUsername = `cam_${crypto.randomBytes(6).toString("hex")}`; // cam_a3f9b2c1d4e5
-    const ftpPassword = crypto.randomBytes(8).toString("hex"); // b2c1d4e5f6a7b8c9
-
-    const token = await CameraToken.create({
-      enterpriseClientId,
-      tokenName,
-      ftpUsername,
-      ftpPassword,
-    });
-
-    const connection = await CameraConnection.create({
-      enterpriseClientId,
-      cameraTokenId: token._id,
-      tokenName: token.tokenName,
-      isOnline: false,
-      isUploadEnabled: true,
-      totalUploaded: 0,
-    });
-
-    return jsonOne(res, HTTP.SUCCESS, {
-      connectionId: connection._id,
-      cameraTokenId: token._id,
-      tokenName: token.tokenName,
-      isOnline: false,
-      isUploadEnabled: true,
-      totalUploaded: 0,
-      assignedEventId: null,
-      assignedAlbumId: null,
-      ftpCredentials: {
-        host: config.ftp.publicHost,
-        port: config.ftp.port,
-        username: ftpUsername,
-        password: ftpPassword,
-      },
-      cameraSetupGuide: {
-        canon:
-          "Menu → Network → FTP Transfer Settings → enter host/port/user/pass",
-        nikon: "Menu → Network → Connect to FTP Server → enter credentials",
-        sony: "Menu → Network → FTP Transfer Func → Server Settings",
-        fujifilm: "Menu → Wireless Settings → FTP Uploading → Server Settings",
-      },
-    });
-  } catch (error) {
-    next(error);
-  }
+const CustomInputField = (props) => {
+  const { type = "text", field, index = "0" } = props;
+  const id = `${field}${index}`;
+  const componentMap = {
+    text: <TextInput {...props} id={id} />,
+    textarea: <TextareaInput {...props} id={id} />,
+    select: <SelectInput {...props} id={id} />,
+    file: <FileInput {...props} id={id} />,
+  };
+  return (
+    <FieldWrapper
+      id={id}
+      css={props.css}
+      placeholder={props.placeholder}
+      error={props.error}
+      required={props.rqd}
+      icon={props.icon}
+      readOnly={props.readOnly}
+      type={type}
+    >
+      {componentMap[type] || <TextInput {...props} id={id} />}
+      {props.extraComponent}
+    </FieldWrapper>
+  );
 };
 
-// ✅ Get all cameras of this client (connected + offline)
-const getCameraList = async (req, res, next) => {
-  try {
-    const { id: enterpriseClientId } = req.tokenPayload;
+export default CustomInputField;
 
-    const cameras = await CameraConnection.find({ enterpriseClientId })
-      .populate("assignedEventId", "eventName slug")
-      .populate("assignedAlbumId", "albumName totalImages")
-      .sort({ isOnline: -1, lastSeenAt: -1 })
-      .lean();
 
-    return jsonOne(res, HTTP.SUCCESS, cameras);
-  } catch (error) {
-    next(error);
-  }
-};
+      <div className="grid sm:grid-cols-2 grid-cols-1 gap-3">
+          {contactData.map((item) => (
+            <div key={item.field} className="flex gap-2">
+              {item.field === "phone" && (
+                <CountryDropdown
+                  selectedCountry={selectedCountry}
+                  showDropdown={showCountryDropdown}
+                  filteredCountries={filteredCountries}
+                  searchValue={countrySearch}
+                  onToggle={toggleDropdown}
+                  onCountrySelect={handleCountrySelect}
+                  onSearchChange={updateSearch}
+                  buttonClassName="rounded-xl"
+                  className="mt-6"
+                />
+              )}
+              <CustomInputField
+                {...item}
+                error={error[item.field]}
+                value={formData[item.field]}
+                onChange={(e) => onChangeField(item.field, e, item?.rqd)}
+              />
+            </div>
+          ))}
+        </div>
 
-// ✅ Assign event + album to camera
-const assignEventAlbum = async (req, res, next) => {
-  try {
-    const { cameraConnectionId } = req.params;
-    const { assignedEventId, assignedAlbumId } = req.body;
-    const { id: enterpriseClientId } = req.tokenPayload;
 
-    const camera = await CameraConnection.findOneAndUpdate(
-      { _id: cameraConnectionId, enterpriseClientId },
-      { assignedEventId, assignedAlbumId },
-      { new: true },
-    )
-      .populate("assignedEventId", "eventName")
-      .populate("assignedAlbumId", "albumName");
 
-    if (!camera) {
-      return throwHttpError("not_found", "Camera not found", HTTP.NOT_FOUND);
-    }
+  const contactData = [
+    {
+      type: "text",
+      field: "name",
+      placeholder: "Full Name",
+      rqd: true,
+      icon: FaUser,
+    },
+    {
+      type: "number",
+      field: "phone",
+      rqd: true,
+      placeholder: "Phone Number",
+    },
+    emailField(),
+    {
+      field: "subject",
+      type: "select",
+      placeholder: "Subject",
+      options: [
+        { value: "technicalSupport", label: "Technical Support" },
+        { value: "billingInquiry", label: "Billing Inquiry" },
+        { value: "featureRequest", label: "Feature Request" },
+        { value: "businessPartnership", label: "Business Partnership" },
+        { value: "generalInquiry", label: "General Inquiry" },
+      ],
+      rqd: true,
+    },
+    {
+      type: "textarea",
+      field: "message",
+      placeholder: "Write your message here",
+      rqd: true,
+    },
+  ];
 
-    updateCameraState(cameraConnectionId, {
-      assignedEventId,
-      assignedAlbumId,
-    });
+"use client";
+import { FaRegEye, FaRegEyeSlash } from "react-icons/fa";
+import { TbLockPassword } from "react-icons/tb";
+import { BsEnvelopeAt } from "react-icons/bs";
+const emailField = (readOnly = false) => ({
+  type: "text",
+  field: "email",
+  placeholder: "E-mail",
+  icon: BsEnvelopeAt,
+  readOnly,
+  rqd: true,
+});
 
-    // ✅ Emit update to dashboard
-    const io = getIO();
-    io.to(`client_${enterpriseClientId}`).emit("camera_updated", {
-      cameraConnectionId,
-      assignedEventId: camera.assignedEventId,
-      assignedAlbumId: camera.assignedAlbumId,
-    });
+const passwordField = (showPass, field, preventSpace) => ({
+  type: showPass ? "text" : "password",
+  field,
+  placeholder: `${field}`,
+  icon: TbLockPassword,
+  passwordimg: showPass ? FaRegEye : FaRegEyeSlash,
+  onKeyPress: preventSpace,
+  rqd: true,
+});
 
-    return jsonOne(res, HTTP.SUCCESS, camera);
-  } catch (error) {
-    next(error);
-  }
-};
+export { emailField, passwordField };
 
-// ✅ Enable / Disable upload toggle
-const toggleCameraUpload = async (req, res, next) => {
-  try {
-    const { cameraConnectionId } = req.params;
-    const { id: enterpriseClientId } = req.tokenPayload;
 
-    const camera = await CameraConnection.findOne({
-      _id: cameraConnectionId,
-      enterpriseClientId,
-    });
 
-    if (!camera) {
-      return throwHttpError("not_found", "Camera not found", HTTP.NOT_FOUND);
-    }
+import React, { useEffect, useRef } from "react";
 
-    camera.isUploadEnabled = !camera.isUploadEnabled;
-    await camera.save();
+export default function Modal({
+  isOpen,
+  onClose,
+  children,
+  className = "",
+  positionClass = "items-center justify-center",
+  closeOnOutsideClick = true,
+}) {
+  const modalRef = useRef();
 
-    updateCameraState(cameraConnectionId, {
-      isUploadEnabled: camera.isUploadEnabled,
-    });
+  useEffect(() => {
+    const handle = (e) => {
+      if (!closeOnOutsideClick) return;
+      if (e.type === "keydown" && e.key === "Escape") onClose();
+      if (e.type === "mousedown" && !modalRef.current?.contains(e.target))
+        onClose();
+    };
+    document.addEventListener("keydown", handle);
+    document.addEventListener("mousedown", handle);
+    return () => {
+      document.removeEventListener("keydown", handle);
+      document.removeEventListener("mousedown", handle);
+    };
+  }, [onClose, closeOnOutsideClick]);
 
-    // ✅ Emit toggle to dashboard
-    const io = getIO();
-    io.to(`client_${enterpriseClientId}`).emit("camera_updated", {
-      cameraConnectionId,
-      isUploadEnabled: camera.isUploadEnabled,
-    });
+  return isOpen ? (
+    <div
+      className={`fixed inset-0 bg-black/30 backdrop-blur-sm z-50 flex ${positionClass}`}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div ref={modalRef} className={className}>
+        {children}
+      </div>
+    </div>
+  ) : null;
+}
 
-    return jsonOne(res, HTTP.SUCCESS, {
-      cameraConnectionId,
-      isUploadEnabled: camera.isUploadEnabled,
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-// ✅ Delete camera token
-const deleteCameraToken = async (req, res, next) => {
-  try {
-    const { tokenId } = req.params;
-    const { id: enterpriseClientId } = req.tokenPayload;
-
-    await CameraToken.findOneAndUpdate(
-      { _id: tokenId, enterpriseClientId },
-      { deletedAt: new Date(), status: AccountStatus.DEACTIVE },
-    );
-
-    // ✅ Also delete the connection record so it's removed from list
-    await CameraConnection.findOneAndDelete({ cameraTokenId: tokenId });
-
-    return jsonOne(res, HTTP.SUCCESS, {}, "Camera removed");
-  } catch (error) {
-    next(error);
-  }
-};
-
-export default {
-  createCameraToken,
-  getCameraList,
-  assignEventAlbum,
-  toggleCameraUpload,
-  deleteCameraToken,
-};
