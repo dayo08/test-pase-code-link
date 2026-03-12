@@ -1,168 +1,1611 @@
-import {
-  FieldWrapper,
-  FileInput,
-  SelectInput,
-  TextareaInput,
-  TextInput,
-} from ".";
+"use client";
 
-const CustomInputField = (props) => {
-  const { type = "text", field, index = "0" } = props;
-  const id = `${field}${index}`;
-  const componentMap = {
-    text: <TextInput {...props} id={id} />,
-    textarea: <TextareaInput {...props} id={id} />,
-    select: <SelectInput {...props} id={id} />,
-    file: <FileInput {...props} id={id} />,
-  };
-  return (
-    <FieldWrapper
-      id={id}
-      css={props.css}
-      placeholder={props.placeholder}
-      error={props.error}
-      required={props.rqd}
-      icon={props.icon}
-      readOnly={props.readOnly}
-      type={type}
-    >
-      {componentMap[type] || <TextInput {...props} id={id} />}
-      {props.extraComponent}
-    </FieldWrapper>
-  );
+import { useRef, useState, useEffect } from "react";
+import Image from "next/image";
+import Link from "next/link";
+import {
+  motion,
+  useInView,
+  AnimatePresence,
+  useScroll,
+  useTransform,
+  useSpring,
+} from "framer-motion";
+import {
+  Search,
+  TrendingDown,
+  Bell,
+  ShoppingCart,
+  Sparkles,
+  Clock,
+  Shield,
+  Zap,
+  BarChart3,
+  ArrowRight,
+  CheckCircle2,
+  Star,
+  Users,
+  Brain,
+  Activity,
+  Tag,
+} from "lucide-react";
+import { amazon_Logo, flipKart_Logo, myntra_Logo } from "@/public/Ecommerce";
+
+/* ═══════════════════════════════════════════════════════════════
+   ANIMATION VARIANTS
+═══════════════════════════════════════════════════════════════ */
+const EASE = [0.22, 1, 0.36, 1];
+
+const fadeUp = {
+  hidden: { opacity: 0, y: 32 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.65, ease: EASE } },
+};
+const fadeDown = {
+  hidden: { opacity: 0, y: -24 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.6, ease: EASE } },
+};
+const slideL = {
+  hidden: { opacity: 0, x: -56 },
+  show: { opacity: 1, x: 0, transition: { duration: 0.7, ease: EASE } },
+};
+const slideR = {
+  hidden: { opacity: 0, x: 56 },
+  show: { opacity: 1, x: 0, transition: { duration: 0.7, ease: EASE } },
+};
+const scaleUp = {
+  hidden: { opacity: 0, scale: 0.85 },
+  show: { opacity: 1, scale: 1, transition: { duration: 0.55, ease: EASE } },
+};
+const blurUp = {
+  hidden: { opacity: 0, y: 24, filter: "blur(8px)" },
+  show: {
+    opacity: 1,
+    y: 0,
+    filter: "blur(0px)",
+    transition: { duration: 0.65, ease: EASE },
+  },
 };
 
-export default CustomInputField;
+const stagger = {
+  hidden: {},
+  show: { transition: { staggerChildren: 0.1, delayChildren: 0.05 } },
+};
+const staggerFast = {
+  hidden: {},
+  show: { transition: { staggerChildren: 0.06, delayChildren: 0.0 } },
+};
 
+/* ═══════════════════════════════════════════════════════════════
+   SCROLL PROGRESS BAR
+═══════════════════════════════════════════════════════════════ */
+function ScrollProgressBar() {
+  const { scrollYProgress } = useScroll();
+  const scaleX = useSpring(scrollYProgress, {
+    stiffness: 120,
+    damping: 30,
+    restDelta: 0.001,
+  });
+  return (
+    <motion.div
+      className="fixed top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-[#0167ff] via-[#34c759] to-[#0167ff] origin-left z-[999]"
+      style={{ scaleX }}
+    />
+  );
+}
 
-      <div className="grid sm:grid-cols-2 grid-cols-1 gap-3">
-          {contactData.map((item) => (
-            <div key={item.field} className="flex gap-2">
-              {item.field === "phone" && (
-                <CountryDropdown
-                  selectedCountry={selectedCountry}
-                  showDropdown={showCountryDropdown}
-                  filteredCountries={filteredCountries}
-                  searchValue={countrySearch}
-                  onToggle={toggleDropdown}
-                  onCountrySelect={handleCountrySelect}
-                  onSearchChange={updateSearch}
-                  buttonClassName="rounded-xl"
-                  className="mt-6"
-                />
-              )}
-              <CustomInputField
-                {...item}
-                error={error[item.field]}
-                value={formData[item.field]}
-                onChange={(e) => onChangeField(item.field, e, item?.rqd)}
-              />
+/* ═══════════════════════════════════════════════════════════════
+   ANIMATED WORDS  (word-by-word blur+slide reveal)
+═══════════════════════════════════════════════════════════════ */
+function AnimatedWords({ text, className = "", delay = 0, once = true }) {
+  const words = text.split(" ");
+  const container = {
+    hidden: {},
+    show: { transition: { staggerChildren: 0.07, delayChildren: delay } },
+  };
+  const word = {
+    hidden: { opacity: 0, y: 22, filter: "blur(6px)" },
+    show: {
+      opacity: 1,
+      y: 0,
+      filter: "blur(0px)",
+      transition: { duration: 0.55, ease: EASE },
+    },
+  };
+  return (
+    <motion.span
+      className={className}
+      initial="hidden"
+      whileInView="show"
+      viewport={{ once, margin: "-30px" }}
+      variants={container}
+    >
+      {words.map((w, i) => (
+        <motion.span
+          key={i}
+          variants={word}
+          className="inline-block"
+          style={{ marginRight: "0.26em" }}
+        >
+          {w}
+        </motion.span>
+      ))}
+    </motion.span>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   REVEAL LINE  (single line push-up from clip)
+═══════════════════════════════════════════════════════════════ */
+function RevealLine({ children, className = "", delay = 0 }) {
+  return (
+    <div className="overflow-hidden">
+      <motion.div
+        className={className}
+        initial={{ y: "110%", opacity: 0 }}
+        whileInView={{ y: "0%", opacity: 1 }}
+        viewport={{ once: true, margin: "-20px" }}
+        transition={{ duration: 0.72, ease: EASE, delay }}
+      >
+        {children}
+      </motion.div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   COUNT-UP STAT
+═══════════════════════════════════════════════════════════════ */
+function CountUpStat({ rawNum, suffix = "", prefix = "", duration = 2 }) {
+  const ref = useRef(null);
+  const isInView = useInView(ref, { once: true });
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    if (!isInView) return;
+    let start = 0;
+    const total = rawNum;
+    const fps = 60;
+    const increment = total / (duration * fps);
+    const iv = setInterval(() => {
+      start += increment;
+      if (start >= total) {
+        setCount(total);
+        clearInterval(iv);
+      } else setCount(Math.floor(start));
+    }, 1000 / fps);
+    return () => clearInterval(iv);
+  }, [isInView, rawNum, duration]);
+
+  return (
+    <span ref={ref}>
+      {prefix}
+      {count}
+      {suffix}
+    </span>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PARALLAX LAYER
+═══════════════════════════════════════════════════════════════ */
+function ParallaxLayer({ children, speed = 0.3, className = "" }) {
+  const ref = useRef(null);
+  const { scrollYProgress } = useScroll({
+    target: ref,
+    offset: ["start end", "end start"],
+  });
+  const y = useTransform(scrollYProgress, [0, 1], [-60 * speed, 60 * speed]);
+  return (
+    <motion.div ref={ref} style={{ y }} className={className}>
+      {children}
+    </motion.div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   FLOATING PARTICLES  (scattered background dots)
+═══════════════════════════════════════════════════════════════ */
+function FloatingParticles({ count = 16, color = "#0167ff" }) {
+  const particles = useRef(
+    Array.from({ length: count }, (_, i) => ({
+      id: i,
+      x: 5 + ((i * 37 + 13) % 90),
+      y: 5 + ((i * 53 + 7) % 90),
+      size: 2 + (i % 3),
+      dur: 5 + (i % 6),
+      del: (i % 8) * 0.4,
+      dy: -12 - (i % 14),
+    })),
+  ).current;
+
+  return (
+    <div className="absolute inset-0 pointer-events-none overflow-hidden">
+      {particles.map((p) => (
+        <motion.div
+          key={p.id}
+          className="absolute rounded-full"
+          style={{
+            width: p.size,
+            height: p.size,
+            left: `${p.x}%`,
+            top: `${p.y}%`,
+            background: color,
+            opacity: 0.25,
+          }}
+          animate={{ y: [0, p.dy, 0], opacity: [0.15, 0.5, 0.15] }}
+          transition={{
+            duration: p.dur,
+            delay: p.del,
+            repeat: Infinity,
+            ease: "easeInOut",
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   GRADIENT SHIMMER TEXT
+═══════════════════════════════════════════════════════════════ */
+function ShimmerText({ children, className = "" }) {
+  return (
+    <motion.span
+      className={`bg-clip-text text-transparent bg-[length:200%_auto] ${className}`}
+      style={{
+        backgroundImage:
+          "linear-gradient(90deg,#ffffff 0%,#a5f3fc 30%,#34c759 50%,#a5f3fc 70%,#ffffff 100%)",
+      }}
+      animate={{ backgroundPosition: ["200% center", "-200% center"] }}
+      transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
+    >
+      {children}
+    </motion.span>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   TYPEWRITER HOOK
+═══════════════════════════════════════════════════════════════ */
+function useTypewriter(texts, typeSpeed = 60, deleteSpeed = 28, pause = 1800) {
+  const [display, setDisplay] = useState("");
+  const [tIdx, setTIdx] = useState(0);
+  const [cIdx, setCIdx] = useState(0);
+  const [deleting, setDeleting] = useState(false);
+  const [paused, setPaused] = useState(false);
+
+  useEffect(() => {
+    if (paused) {
+      const t = setTimeout(() => {
+        setPaused(false);
+        setDeleting(true);
+      }, pause);
+      return () => clearTimeout(t);
+    }
+    const t = setTimeout(
+      () => {
+        const word = texts[tIdx];
+        if (!deleting) {
+          if (cIdx < word.length) {
+            setDisplay(word.slice(0, cIdx + 1));
+            setCIdx((c) => c + 1);
+          } else setPaused(true);
+        } else {
+          if (cIdx > 0) {
+            setDisplay(word.slice(0, cIdx - 1));
+            setCIdx((c) => c - 1);
+          } else {
+            setDeleting(false);
+            setTIdx((i) => (i + 1) % texts.length);
+          }
+        }
+      },
+      deleting ? deleteSpeed : typeSpeed,
+    );
+    return () => clearTimeout(t);
+  }, [cIdx, deleting, paused, tIdx, texts, typeSpeed, deleteSpeed, pause]);
+
+  return display;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   ORBIT RING
+═══════════════════════════════════════════════════════════════ */
+function OrbitRing({ radius, dots, speed, color, dotSize = 4, delay = 0 }) {
+  return (
+    <motion.div
+      className="absolute inset-0 m-auto"
+      style={{ width: radius * 2, height: radius * 2 }}
+      animate={{ rotate: 360 }}
+      transition={{ repeat: Infinity, duration: speed, ease: "linear", delay }}
+    >
+      {Array.from({ length: dots }).map((_, i) => {
+        const angle = (i / dots) * 2 * Math.PI;
+        const x = Math.cos(angle) * radius - dotSize / 2;
+        const y = Math.sin(angle) * radius - dotSize / 2;
+        return (
+          <div
+            key={i}
+            className="absolute rounded-full"
+            style={{
+              width: dotSize,
+              height: dotSize,
+              background: color,
+              left: "50%",
+              top: "50%",
+              transform: `translate(${x}px, ${y}px)`,
+              boxShadow: `0 0 ${dotSize * 2}px ${color}`,
+            }}
+          />
+        );
+      })}
+    </motion.div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   AI BRAIN ORBIT
+═══════════════════════════════════════════════════════════════ */
+function AIBrainOrbit() {
+  return (
+    <div className="relative w-36 h-36 mx-auto flex items-center justify-center">
+      {[0, 1, 2].map((i) => (
+        <motion.div
+          key={i}
+          className="absolute inset-0 rounded-full border border-[#0167ff]/50"
+          animate={{ scale: [1, 2.6, 1], opacity: [0.35, 0, 0.35] }}
+          transition={{
+            repeat: Infinity,
+            duration: 3,
+            delay: i * 0.9,
+            ease: "easeOut",
+          }}
+        />
+      ))}
+      <div className="absolute inset-0 flex items-center justify-center">
+        <div className="relative" style={{ width: 130, height: 130 }}>
+          <OrbitRing
+            radius={60}
+            dots={3}
+            speed={7}
+            color="#0167ff"
+            dotSize={5}
+          />
+          <OrbitRing
+            radius={46}
+            dots={4}
+            speed={4.5}
+            color="#34c759"
+            dotSize={4}
+            delay={0.8}
+          />
+          <OrbitRing
+            radius={30}
+            dots={2}
+            speed={2.8}
+            color="#a78bfa"
+            dotSize={3}
+            delay={0.3}
+          />
+        </div>
+      </div>
+      <motion.div
+        className="relative z-10 w-14 h-14 rounded-2xl bg-gradient-to-br from-[#0167ff] to-[#0145b5] flex items-center justify-center"
+        style={{ boxShadow: "0 0 32px #0167ff70, 0 8px 24px #0167ff50" }}
+        animate={{ scale: [1, 1.07, 1] }}
+        transition={{ repeat: Infinity, duration: 2.8, ease: "easeInOut" }}
+      >
+        <Brain className="w-7 h-7 text-white" />
+      </motion.div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   FLOATING PRICE ALERTS
+═══════════════════════════════════════════════════════════════ */
+function FloatingAlerts() {
+  const alerts = [
+    {
+      product: "iPhone 15 Pro",
+      platform: "Flipkart",
+      drop: "₹3,000",
+      pct: "12%",
+    },
+    { product: "Nike Air Max", platform: "Amazon", drop: "₹1,500", pct: "18%" },
+    {
+      product: "Sony WH-1000XM5",
+      platform: "Myntra",
+      drop: "₹2,200",
+      pct: "22%",
+    },
+    {
+      product: "Samsung 55″ TV",
+      platform: "Flipkart",
+      drop: "₹5,000",
+      pct: "15%",
+    },
+  ];
+  const [idx, setIdx] = useState(0);
+  const [show, setShow] = useState(true);
+
+  useEffect(() => {
+    const iv = setInterval(() => {
+      setShow(false);
+      setTimeout(() => {
+        setIdx((i) => (i + 1) % alerts.length);
+        setShow(true);
+      }, 380);
+    }, 3000);
+    return () => clearInterval(iv);
+  }, []);
+
+  const a = alerts[idx];
+  return (
+    <div className="absolute -bottom-4 -left-4 z-20 min-w-[180px]">
+      <AnimatePresence mode="wait">
+        {show && (
+          <motion.div
+            key={idx}
+            initial={{ opacity: 0, x: 30, scale: 0.88 }}
+            animate={{ opacity: 1, x: 0, scale: 1 }}
+            exit={{ opacity: 0, x: -20, scale: 0.92 }}
+            transition={{ duration: 0.35, ease: EASE }}
+            className="flex items-center gap-2 px-3 py-2 bg-white rounded-xl shadow-xl border border-gray-100"
+          >
+            <div className="w-6 h-6 rounded-lg bg-[#34c759]/10 flex items-center justify-center shrink-0">
+              <TrendingDown className="w-3.5 h-3.5 text-[#34c759]" />
             </div>
-          ))}
+            <div className="min-w-0">
+              <p className="text-[9px] font-bold text-gray-900 truncate">
+                {a.product}
+              </p>
+              <p className="text-[8px] text-[#34c759] font-bold">
+                {a.drop} off on {a.platform} ({a.pct})
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   NEURAL NETWORK BG
+═══════════════════════════════════════════════════════════════ */
+function NeuralBg() {
+  const nodes = [
+    { x: 60, y: 40 },
+    { x: 200, y: 80 },
+    { x: 340, y: 30 },
+    { x: 480, y: 90 },
+    { x: 100, y: 160 },
+    { x: 260, y: 130 },
+    { x: 420, y: 170 },
+    { x: 30, y: 220 },
+    { x: 180, y: 250 },
+    { x: 330, y: 210 },
+    { x: 490, y: 240 },
+  ];
+  const edges = [
+    [0, 1],
+    [1, 2],
+    [2, 3],
+    [0, 4],
+    [1, 5],
+    [2, 5],
+    [3, 6],
+    [4, 5],
+    [5, 6],
+    [4, 7],
+    [5, 8],
+    [6, 9],
+    [7, 8],
+    [8, 9],
+    [9, 10],
+    [3, 10],
+    [6, 10],
+  ];
+  return (
+    <svg
+      className="absolute inset-0 w-full h-full pointer-events-none opacity-20"
+      viewBox="0 0 520 280"
+      preserveAspectRatio="xMidYMid slice"
+    >
+      {edges.map(([a, b], i) => (
+        <motion.line
+          key={i}
+          x1={nodes[a].x}
+          y1={nodes[a].y}
+          x2={nodes[b].x}
+          y2={nodes[b].y}
+          stroke="#0167ff"
+          strokeWidth="0.8"
+          initial={{ pathLength: 0, opacity: 0 }}
+          animate={{ pathLength: 1, opacity: [0, 0.6, 0.3] }}
+          transition={{
+            duration: 1.5,
+            delay: i * 0.07,
+            ease: "easeOut",
+            opacity: { duration: 2, repeat: Infinity, repeatType: "reverse" },
+          }}
+        />
+      ))}
+      {nodes.map((n, i) => (
+        <motion.circle
+          key={i}
+          cx={n.x}
+          cy={n.y}
+          r="3.5"
+          fill="#0167ff"
+          initial={{ scale: 0, opacity: 0 }}
+          animate={{ scale: [1, 1.3, 1], opacity: [0.4, 0.9, 0.4] }}
+          transition={{
+            duration: 2,
+            delay: i * 0.12,
+            repeat: Infinity,
+            ease: "easeInOut",
+          }}
+        />
+      ))}
+    </svg>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   DATA STREAM  (animated packets flowing in AI section)
+═══════════════════════════════════════════════════════════════ */
+function DataStream() {
+  const streams = [0, 1, 2, 3, 4];
+  return (
+    <div className="absolute inset-0 pointer-events-none overflow-hidden opacity-30">
+      {streams.map((i) => (
+        <motion.div
+          key={i}
+          className="absolute h-px w-16 rounded-full"
+          style={{
+            top: `${20 + i * 16}%`,
+            background:
+              i % 2 === 0
+                ? "linear-gradient(to right,transparent,#0167ff,transparent)"
+                : "linear-gradient(to right,transparent,#34c759,transparent)",
+          }}
+          animate={{ x: ["-80px", "calc(100% + 80px)"] }}
+          transition={{
+            duration: 2.5 + i * 0.4,
+            delay: i * 0.55,
+            repeat: Infinity,
+            ease: "linear",
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   STEP TIMELINE  (vertical scroll-driven line)
+═══════════════════════════════════════════════════════════════ */
+function StepTimeline() {
+  const ref = useRef(null);
+  const { scrollYProgress } = useScroll({
+    target: ref,
+    offset: ["start 80%", "end 20%"],
+  });
+  const scaleY = useSpring(scrollYProgress, { stiffness: 60, damping: 20 });
+
+  return (
+    <div
+      ref={ref}
+      className="hidden lg:block absolute left-1/2 top-8 bottom-8 w-px -translate-x-1/2 pointer-events-none"
+    >
+      <div className="w-full h-full bg-gray-100 rounded-full" />
+      <motion.div
+        className="absolute top-0 left-0 w-full bg-gradient-to-b from-[#0167ff] via-[#34c759] to-[#8b5cf6] rounded-full origin-top"
+        style={{ scaleY, height: "100%" }}
+      />
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   AI SCANNER VISUAL
+═══════════════════════════════════════════════════════════════ */
+function AIScannerVisual() {
+  const messages = [
+    "Scanning Flipkart prices...",
+    "Comparing Amazon deals...",
+    "Checking Myntra offers...",
+    "Analyzing price history...",
+    "Best deal found! ✨",
+  ];
+  const scanText = useTypewriter(messages, 55, 26, 1600);
+  const barValues = [68, 52, 62, 36, 56, 28, 40, 30];
+
+  return (
+    <motion.div
+      initial="hidden"
+      whileInView="show"
+      viewport={{ once: true, margin: "-60px" }}
+      variants={slideR}
+      className="relative w-full max-w-sm mx-auto"
+    >
+      <div className="absolute -inset-6 bg-gradient-to-br from-[#0167ff]/20 to-[#34c759]/15 rounded-[2rem] blur-3xl pointer-events-none" />
+
+      <div className="relative rounded-2xl bg-white shadow-2xl border border-gray-100 overflow-visible">
+        {/* Blue Header */}
+        <div className="relative rounded-t-2xl bg-gradient-to-br from-[#0040cc] via-[#0167ff] to-[#0185ff] px-5 pt-4 pb-6 overflow-hidden">
+          <NeuralBg />
+          <DataStream />
+
+          <div className="relative z-10 flex justify-end mb-1">
+            <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-white/10 border border-white/20">
+              <motion.div
+                className="w-1.5 h-1.5 rounded-full bg-[#34c759]"
+                animate={{ opacity: [1, 0.2, 1] }}
+                transition={{ repeat: Infinity, duration: 1.3 }}
+              />
+              <span className="text-[9px] text-white font-bold">LIVE</span>
+            </div>
+          </div>
+
+          <div className="relative z-10">
+            <AIBrainOrbit />
+          </div>
+
+          <div className="relative z-10 flex justify-center mt-3">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/10 backdrop-blur border border-white/20">
+              <motion.div
+                className="w-1 h-1 rounded-full bg-white shrink-0"
+                animate={{ opacity: [1, 0.2, 1] }}
+                transition={{ repeat: Infinity, duration: 0.7 }}
+              />
+              <span
+                className="text-[10px] text-white font-medium"
+                style={{ minWidth: 170 }}
+              >
+                {scanText}
+                <motion.span
+                  className="inline-block w-[2px] h-3 bg-white/80 ml-0.5 align-middle rounded"
+                  animate={{ opacity: [1, 0, 1] }}
+                  transition={{ repeat: Infinity, duration: 0.55 }}
+                />
+              </span>
+            </div>
+          </div>
         </div>
 
+        {/* White Body */}
+        <div className="px-4 pt-4 pb-5 space-y-3">
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[9px] text-gray-400 font-semibold">
+                90-Day Price History
+              </span>
+              <span className="text-[9px] text-[#34c759] font-bold">
+                ↓ 23% today
+              </span>
+            </div>
+            <div className="flex items-end gap-[3px] h-11">
+              {barValues.map((h, i) => (
+                <motion.div
+                  key={i}
+                  className="flex-1 rounded-t"
+                  style={{ transformOrigin: "bottom" }}
+                  initial={{ scaleY: 0 }}
+                  whileInView={{ scaleY: 1 }}
+                  viewport={{ once: true }}
+                  transition={{
+                    delay: 0.5 + i * 0.07,
+                    duration: 0.55,
+                    ease: "easeOut",
+                  }}
+                >
+                  <div
+                    className="w-full rounded-t"
+                    style={{
+                      height: `${h * 0.44}px`,
+                      background:
+                        i === barValues.length - 1
+                          ? "linear-gradient(to top,#34c759,#a5f3c0)"
+                          : i > 4
+                            ? "linear-gradient(to top,#0167ff,#93c5fd)"
+                            : "linear-gradient(to top,#0167ff1a,#0167ff40)",
+                    }}
+                  />
+                </motion.div>
+              ))}
+            </div>
+            <div className="flex justify-between mt-0.5">
+              <span className="text-[8px] text-gray-300">3 months ago</span>
+              <span className="text-[8px] text-gray-300">Today</span>
+            </div>
+          </div>
 
+          <div className="space-y-1.5">
+            <span className="text-[9px] text-gray-400 font-bold uppercase tracking-widest">
+              Live Comparison
+            </span>
+            {[
+              {
+                name: "Flipkart",
+                price: "₹4,999",
+                pct: "38%",
+                best: true,
+                d: 0.9,
+              },
+              {
+                name: "Amazon",
+                price: "₹5,499",
+                pct: "53%",
+                best: false,
+                d: 1.05,
+              },
+              {
+                name: "Myntra",
+                price: "₹5,999",
+                pct: "68%",
+                best: false,
+                d: 1.2,
+              },
+            ].map((p, i) => (
+              <div key={i} className="flex items-center gap-1.5">
+                <span className="text-[9px] w-11 text-gray-600 font-semibold shrink-0">
+                  {p.name}
+                </span>
+                <div className="flex-1 h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                  <motion.div
+                    className="h-full rounded-full"
+                    style={{
+                      background: p.best
+                        ? "linear-gradient(to right,#34c759,#28a745)"
+                        : "linear-gradient(to right,#0167ff,#60a5fa)",
+                    }}
+                    initial={{ width: 0 }}
+                    whileInView={{ width: p.pct }}
+                    viewport={{ once: true }}
+                    transition={{ delay: p.d, duration: 0.75, ease: "easeOut" }}
+                  />
+                </div>
+                <span
+                  className={`text-[9px] font-bold shrink-0 ${p.best ? "text-[#34c759]" : "text-gray-500"}`}
+                >
+                  {p.price}
+                </span>
+                {p.best && (
+                  <motion.span
+                    className="shrink-0 text-[7px] bg-[#34c759] text-white px-1 py-0.5 rounded font-black"
+                    animate={{ scale: [1, 1.12, 1] }}
+                    transition={{ repeat: Infinity, duration: 2 }}
+                  >
+                    BEST
+                  </motion.span>
+                )}
+              </div>
+            ))}
+          </div>
 
-  const contactData = [
+          <motion.div
+            className="flex items-center gap-2 p-2.5 rounded-xl bg-[#34c759]/8 border border-[#34c759]/20"
+            initial={{ opacity: 0, y: 8 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ delay: 1.5, duration: 0.5 }}
+          >
+            <div className="w-6 h-6 rounded-lg bg-[#34c759]/15 flex items-center justify-center shrink-0">
+              <Sparkles className="w-3.5 h-3.5 text-[#34c759]" />
+            </div>
+            <div>
+              <p className="text-[9px] font-black text-gray-900">
+                You save ₹1,000 on Flipkart!
+              </p>
+              <p className="text-[8px] text-gray-400">
+                vs highest price available today
+              </p>
+            </div>
+          </motion.div>
+        </div>
+
+        <FloatingAlerts />
+      </div>
+    </motion.div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SECTION BADGE
+═══════════════════════════════════════════════════════════════ */
+function SectionBadge({ icon: Icon, label }) {
+  return (
+    <motion.div
+      variants={blurUp}
+      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-blue-50 text-[#0167ff] text-xs font-bold mb-3 border border-blue-100"
+    >
+      <Icon className="w-3.5 h-3.5" /> {label}
+    </motion.div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   MAIN PAGE
+═══════════════════════════════════════════════════════════════ */
+export default function HowItWorksClient() {
+  const steps = [
     {
-      type: "text",
-      field: "name",
-      placeholder: "Full Name",
-      rqd: true,
-      icon: FaUser,
+      number: "01",
+      title: "Search or Paste Link",
+      description:
+        "Simply paste a product link from Flipkart, Meesho, Amazon, or Snapdeal, or search for any product directly on our platform.",
+      icon: Search,
+      color: "from-[#0167ff] to-[#0156d6]",
+      accent: "#0167ff",
     },
     {
-      type: "number",
-      field: "phone",
-      rqd: true,
-      placeholder: "Phone Number",
-    },
-    emailField(),
-    {
-      field: "subject",
-      type: "select",
-      placeholder: "Subject",
-      options: [
-        { value: "technicalSupport", label: "Technical Support" },
-        { value: "billingInquiry", label: "Billing Inquiry" },
-        { value: "featureRequest", label: "Feature Request" },
-        { value: "businessPartnership", label: "Business Partnership" },
-        { value: "generalInquiry", label: "General Inquiry" },
-      ],
-      rqd: true,
+      number: "02",
+      title: "Compare Prices Instantly",
+      description:
+        "Our AI instantly scans all major e-commerce platforms to show you the best price available right now, along with complete price history.",
+      icon: BarChart3,
+      color: "from-[#34c759] to-[#28a745]",
+      accent: "#34c759",
     },
     {
-      type: "textarea",
-      field: "message",
-      placeholder: "Write your message here",
-      rqd: true,
+      number: "03",
+      title: "Set Price Alerts",
+      description:
+        "Set your target price and get instant notifications via email when the product drops to your desired price on any platform.",
+      icon: Bell,
+      color: "from-violet-500 to-violet-700",
+      accent: "#8b5cf6",
+    },
+    {
+      number: "04",
+      title: "Buy at Best Price",
+      description:
+        "Click through to the platform with the lowest price and complete your purchase with confidence, knowing you got the best deal.",
+      icon: ShoppingCart,
+      color: "from-orange-500 to-red-500",
+      accent: "#f97316",
     },
   ];
 
-"use client";
-import { FaRegEye, FaRegEyeSlash } from "react-icons/fa";
-import { TbLockPassword } from "react-icons/tb";
-import { BsEnvelopeAt } from "react-icons/bs";
-const emailField = (readOnly = false) => ({
-  type: "text",
-  field: "email",
-  placeholder: "E-mail",
-  icon: BsEnvelopeAt,
-  readOnly,
-  rqd: true,
-});
+  const features = [
+    {
+      icon: Clock,
+      title: "24/7 Price Monitoring",
+      description:
+        "We track prices round the clock so you never miss a price drop",
+      grad: "from-blue-500 to-[#0167ff]",
+    },
+    {
+      icon: Shield,
+      title: "100% Free Forever",
+      description:
+        "No hidden charges, no premium plans. Completely free to use",
+      grad: "from-[#34c759] to-emerald-600",
+    },
+    {
+      icon: Zap,
+      title: "Instant Notifications",
+      description: "Get real-time alerts via email when prices drop",
+      grad: "from-yellow-400 to-orange-500",
+    },
+    {
+      icon: TrendingDown,
+      title: "Historical Price Data",
+      description: "View complete price history charts for informed decisions",
+      grad: "from-purple-500 to-violet-600",
+    },
+    {
+      icon: Star,
+      title: "Best Deal Guarantee",
+      description:
+        "We compare across 4+ platforms to find you the lowest price",
+      grad: "from-pink-500 to-rose-500",
+    },
+    {
+      icon: Users,
+      title: "Community Verified",
+      description: "Join millions of smart shoppers saving money daily",
+      grad: "from-cyan-500 to-teal-600",
+    },
+  ];
 
-const passwordField = (showPass, field, preventSpace) => ({
-  type: showPass ? "text" : "password",
-  field,
-  placeholder: `${field}`,
-  icon: TbLockPassword,
-  passwordimg: showPass ? FaRegEye : FaRegEyeSlash,
-  onKeyPress: preventSpace,
-  rqd: true,
-});
+  const platforms = [
+    { name: "Flipkart", logo: flipKart_Logo, color: "#2874F0" },
+    { name: "Amazon", logo: amazon_Logo, color: "#FF9900" },
+    { name: "Myntra", logo: myntra_Logo, color: "#E40046" },
+  ];
 
-export { emailField, passwordField };
+  const stats = [
+    { raw: 10, suffix: "M+", prefix: "", label: "Products Tracked" },
+    { raw: 50, suffix: "K+", prefix: "", label: "Daily Price Drops" },
+    { raw: 2, suffix: "M+", prefix: "", label: "Happy Users" },
+    { raw: 500, suffix: "Cr+", prefix: "₹", label: "Money Saved" },
+  ];
 
+  return (
+    <>
+      <ScrollProgressBar />
+      <div className="min-h-screen bg-white overflow-x-hidden">
+        {/* ══════════════════ HERO ══════════════════ */}
+        <section className="relative overflow-hidden bg-gradient-to-br from-[#0040cc] via-[#0167ff] to-[#0185ff]">
+          <FloatingParticles count={24} color="#ffffff" />
+          <div className="pointer-events-none absolute inset-0 overflow-hidden">
+            <ParallaxLayer
+              speed={0.6}
+              className="absolute -top-40 -left-40 w-96 h-96"
+            >
+              <motion.div
+                animate={{ scale: [1, 1.15, 1] }}
+                transition={{
+                  repeat: Infinity,
+                  duration: 9,
+                  ease: "easeInOut",
+                }}
+                className="w-full h-full bg-white/10 rounded-full blur-3xl"
+              />
+            </ParallaxLayer>
+            <ParallaxLayer
+              speed={0.4}
+              className="absolute -bottom-32 -right-32 w-80 h-80"
+            >
+              <motion.div
+                animate={{ scale: [1, 1.18, 1] }}
+                transition={{
+                  repeat: Infinity,
+                  duration: 11,
+                  ease: "easeInOut",
+                  delay: 2,
+                }}
+                className="w-full h-full bg-[#34c759]/20 rounded-full blur-3xl"
+              />
+            </ParallaxLayer>
+          </div>
+          <div
+            className="pointer-events-none absolute inset-0 opacity-[0.06]"
+            style={{
+              backgroundImage:
+                "linear-gradient(white 1px,transparent 1px),linear-gradient(90deg,white 1px,transparent 1px)",
+              backgroundSize: "40px 40px",
+            }}
+          />
 
+          <div className="container mx-auto px-4 sm:px-6 lg:px-8 pt-14 pb-12 relative z-10">
+            <div className="max-w-3xl mx-auto text-center text-white">
+              {/* Badge */}
+              <motion.div
+                initial={{ opacity: 0, y: -18 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.6 }}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-white/10 backdrop-blur border border-white/25 text-xs font-semibold mb-5"
+              >
+                <motion.span
+                  animate={{ rotate: [0, 15, -15, 0] }}
+                  transition={{ repeat: Infinity, duration: 3.5, delay: 2 }}
+                  className="inline-flex"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-yellow-300" />
+                </motion.span>
+                Smart Shopping — Powered by AI
+              </motion.div>
 
-import React, { useEffect, useRef } from "react";
+              {/* H1 with word animation */}
+              <h1 className="text-[2rem] sm:text-4xl lg:text-[3.2rem] font-black leading-tight mb-4">
+                <AnimatedWords
+                  text="How Discount Deals"
+                  className="text-white block"
+                  delay={0.1}
+                />
+                <span className="block mt-1">
+                  <ShimmerText className="text-[2rem] sm:text-4xl lg:text-[3.2rem] font-black">
+                    Live Works
+                  </ShimmerText>
+                </span>
+              </h1>
 
-export default function Modal({
-  isOpen,
-  onClose,
-  children,
-  className = "",
-  positionClass = "items-center justify-center",
-  closeOnOutsideClick = true,
-}) {
-  const modalRef = useRef();
+              {/* Sub */}
+              <motion.p
+                initial={{ opacity: 0, y: 22 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.7, delay: 0.35 }}
+                className="text-sm sm:text-[0.95rem] text-white/85 mb-7 max-w-xl mx-auto leading-relaxed"
+              >
+                Track prices, compare deals, and save money automatically across
+                India&apos;s top e-commerce platforms
+              </motion.p>
 
-  useEffect(() => {
-    const handle = (e) => {
-      if (!closeOnOutsideClick) return;
-      if (e.type === "keydown" && e.key === "Escape") onClose();
-      if (e.type === "mousedown" && !modalRef.current?.contains(e.target))
-        onClose();
-    };
-    document.addEventListener("keydown", handle);
-    document.addEventListener("mousedown", handle);
-    return () => {
-      document.removeEventListener("keydown", handle);
-      document.removeEventListener("mousedown", handle);
-    };
-  }, [onClose, closeOnOutsideClick]);
+              {/* CTAs */}
+              <motion.div
+                initial={{ opacity: 0, y: 22 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.7, delay: 0.45 }}
+                className="flex flex-col sm:flex-row items-center justify-center gap-3"
+              >
+                <Link
+                  href="/signup"
+                  className="group w-full sm:w-auto inline-flex items-center justify-center gap-2 px-7 py-2.5 bg-white text-[#0167ff] text-sm font-bold rounded-xl shadow-2xl hover:shadow-white/20 hover:scale-105 active:scale-95 transition-all duration-200"
+                >
+                  Get Started Free
+                  <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                </Link>
+                <Link
+                  href="#how-it-works"
+                  className="w-full sm:w-auto px-7 py-2.5 bg-white/10 backdrop-blur text-white text-sm font-bold rounded-xl border border-white/30 hover:bg-white/20 active:scale-95 transition-all duration-200"
+                >
+                  See How It Works
+                </Link>
+              </motion.div>
+            </div>
 
-  return isOpen ? (
-    <div
-      className={`fixed inset-0 bg-black/30 backdrop-blur-sm z-50 flex ${positionClass}`}
-      role="dialog"
-      aria-modal="true"
-    >
-      <div ref={modalRef} className={className}>
-        {children}
+            {/* Stats with CountUp */}
+            <motion.div
+              initial="hidden"
+              animate="show"
+              variants={stagger}
+              className="grid grid-cols-2 md:grid-cols-4 gap-3 max-w-3xl mx-auto mt-10"
+            >
+              {stats.map((s, i) => (
+                <motion.div
+                  key={i}
+                  variants={fadeUp}
+                  className="text-center py-3.5 px-2 rounded-xl bg-white/10 backdrop-blur border border-white/20"
+                >
+                  <p className="text-xl sm:text-2xl font-black text-white">
+                    <CountUpStat
+                      rawNum={s.raw}
+                      suffix={s.suffix}
+                      prefix={s.prefix}
+                      duration={2}
+                    />
+                  </p>
+                  <p className="text-[10px] sm:text-[11px] text-white/70 font-semibold mt-0.5">
+                    {s.label}
+                  </p>
+                </motion.div>
+              ))}
+            </motion.div>
+          </div>
+
+          <svg
+            viewBox="0 0 1440 28"
+            fill="white"
+            preserveAspectRatio="none"
+            className="w-full h-5 sm:h-7 block"
+          >
+            <path d="M0,0 C360,28 1080,28 1440,0 L1440,28 L0,28 Z" />
+          </svg>
+        </section>
+
+        {/* ══════════════════ STEPS ══════════════════ */}
+        <section id="how-it-works" className="py-16 md:py-20 bg-white relative">
+          <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+            <motion.div
+              initial="hidden"
+              whileInView="show"
+              viewport={{ once: true, margin: "-60px" }}
+              variants={stagger}
+              className="text-center max-w-2xl mx-auto mb-16"
+            >
+              <SectionBadge icon={Clock} label="Simple 4-Step Process" />
+              <h2 className="text-2xl sm:text-3xl lg:text-4xl font-black text-gray-900 mb-2.5">
+                <AnimatedWords text="Save Money in 4 Easy Steps" />
+              </h2>
+              <motion.p variants={blurUp} className="text-sm text-gray-500">
+                No complex setup. No credit card required. Start saving in under
+                2 minutes.
+              </motion.p>
+            </motion.div>
+
+            {/* Timeline container */}
+            <div className="relative">
+              <StepTimeline />
+
+              <div className="space-y-16 md:space-y-20">
+                {steps.map((step, idx) => {
+                  const even = idx % 2 === 0;
+                  return (
+                    <motion.div
+                      key={idx}
+                      initial="hidden"
+                      whileInView="show"
+                      viewport={{ once: true, margin: "-80px" }}
+                      variants={stagger}
+                      className={`flex flex-col ${even ? "lg:flex-row" : "lg:flex-row-reverse"} gap-8 lg:gap-14 items-center`}
+                    >
+                      {/* Text */}
+                      <motion.div
+                        variants={even ? slideL : slideR}
+                        className="flex-1 space-y-4"
+                      >
+                        <motion.div
+                          className={`inline-flex items-center justify-center w-11 h-11 rounded-xl bg-gradient-to-br ${step.color} text-white text-sm font-black shadow-lg`}
+                          style={{ boxShadow: `0 8px 24px ${step.accent}45` }}
+                          whileHover={{
+                            rotate: [0, -8, 8, 0],
+                            transition: { duration: 0.4 },
+                          }}
+                        >
+                          {step.number}
+                        </motion.div>
+
+                        <div className="overflow-hidden">
+                          <motion.h3
+                            variants={blurUp}
+                            className="text-xl sm:text-2xl font-black text-gray-900"
+                          >
+                            {step.title}
+                          </motion.h3>
+                        </div>
+
+                        <motion.p
+                          variants={fadeUp}
+                          className="text-sm text-gray-500 leading-relaxed max-w-md"
+                        >
+                          {step.description}
+                        </motion.p>
+
+                        <motion.div
+                          variants={scaleUp}
+                          className="inline-flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-gray-50 border border-gray-200 hover:border-gray-300 transition-colors"
+                        >
+                          <div
+                            className={`w-8 h-8 rounded-lg bg-gradient-to-br ${step.color} flex items-center justify-center shadow-sm`}
+                          >
+                            <step.icon className="w-4 h-4 text-white" />
+                          </div>
+                          <div>
+                            <p className="text-xs font-bold text-gray-900">
+                              Quick &amp; Easy
+                            </p>
+                            <p className="text-[11px] text-gray-500">
+                              Takes less than 30 seconds
+                            </p>
+                          </div>
+                        </motion.div>
+                      </motion.div>
+
+                      {/* Visual */}
+                      <motion.div
+                        variants={even ? slideR : slideL}
+                        className="flex-1 w-full max-w-xs sm:max-w-sm mx-auto"
+                      >
+                        <div className="relative aspect-square">
+                          <div
+                            className={`absolute inset-0 bg-gradient-to-br ${step.color} opacity-10 rounded-3xl blur-2xl scale-110`}
+                          />
+                          <motion.div
+                            whileHover={{ y: -8, scale: 1.02 }}
+                            transition={{
+                              type: "spring",
+                              stiffness: 280,
+                              damping: 18,
+                            }}
+                            className="relative w-full h-full rounded-2xl bg-gradient-to-br from-gray-50 to-white shadow-xl border border-gray-100 flex items-center justify-center overflow-hidden"
+                          >
+                            {/* Subtle grid inside card */}
+                            <div
+                              className="absolute inset-0 opacity-[0.03]"
+                              style={{
+                                backgroundImage:
+                                  "linear-gradient(gray 1px,transparent 1px),linear-gradient(90deg,gray 1px,transparent 1px)",
+                                backgroundSize: "20px 20px",
+                              }}
+                            />
+
+                            <div
+                              className={`w-20 h-20 rounded-3xl bg-gradient-to-br ${step.color} flex items-center justify-center shadow-2xl`}
+                              style={{
+                                boxShadow: `0 16px 48px ${step.accent}55`,
+                              }}
+                            >
+                              <motion.div
+                                animate={{
+                                  scale: [1, 1.08, 1],
+                                  rotate: [0, 4, -4, 0],
+                                }}
+                                transition={{
+                                  repeat: Infinity,
+                                  duration: 3.5,
+                                  ease: "easeInOut",
+                                }}
+                              >
+                                <step.icon className="w-9 h-9 text-white" />
+                              </motion.div>
+                            </div>
+
+                            {/* Ring pulse */}
+                            <motion.div
+                              animate={{
+                                scale: [1, 1.55, 1],
+                                opacity: [0.12, 0, 0.12],
+                              }}
+                              transition={{
+                                repeat: Infinity,
+                                duration: 3,
+                                ease: "easeInOut",
+                              }}
+                              className="absolute w-32 h-32 rounded-full border-2"
+                              style={{ borderColor: step.accent }}
+                            />
+                          </motion.div>
+
+                          {/* Float badge */}
+                          <motion.div
+                            animate={{ y: [-4, 4, -4] }}
+                            transition={{
+                              repeat: Infinity,
+                              duration: 3,
+                              ease: "easeInOut",
+                            }}
+                            className="absolute -bottom-3 -right-3 flex items-center gap-1.5 px-3 py-1.5 bg-white rounded-xl shadow-lg border border-gray-100"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5 text-[#34c759]" />
+                            <span className="text-xs font-bold text-gray-800">
+                              Step {idx + 1} of 4
+                            </span>
+                          </motion.div>
+                        </div>
+                      </motion.div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ══════════════════ AI TRACKING ══════════════════ */}
+        <section className="py-16 md:py-20 bg-gradient-to-br from-slate-50 via-white to-blue-50/40 relative overflow-hidden">
+          <FloatingParticles count={12} color="#0167ff" />
+          <div className="absolute inset-0 pointer-events-none overflow-hidden">
+            <ParallaxLayer
+              speed={0.5}
+              className="absolute top-0 right-0 w-96 h-96"
+            >
+              <div className="w-full h-full bg-[#0167ff]/5 rounded-full blur-3xl" />
+            </ParallaxLayer>
+            <ParallaxLayer
+              speed={0.3}
+              className="absolute bottom-0 left-0 w-80 h-80"
+            >
+              <div className="w-full h-full bg-[#34c759]/5 rounded-full blur-3xl" />
+            </ParallaxLayer>
+          </div>
+
+          <div className="container mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+            <div className="max-w-5xl mx-auto grid lg:grid-cols-2 gap-14 items-center">
+              {/* Left */}
+              <motion.div
+                initial="hidden"
+                whileInView="show"
+                viewport={{ once: true, margin: "-80px" }}
+                variants={stagger}
+                className="space-y-5"
+              >
+                <motion.div
+                  variants={blurUp}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white text-[#0167ff] text-xs font-bold border-2 border-[#0167ff]/15 shadow-sm"
+                >
+                  <Brain className="w-3.5 h-3.5" /> Advanced AI Technology
+                </motion.div>
+
+                <h2 className="text-2xl sm:text-3xl font-black text-gray-900">
+                  <AnimatedWords text="How Our AI Tracks Prices 24/7" />
+                </h2>
+
+                <motion.p
+                  variants={blurUp}
+                  className="text-sm text-gray-500 leading-relaxed"
+                >
+                  Our advanced algorithms continuously monitor prices across all
+                  supported platforms, analyzing historical data to predict the
+                  best time to buy.
+                </motion.p>
+
+                <motion.div variants={stagger} className="space-y-2">
+                  {[
+                    {
+                      icon: Activity,
+                      title: "Real-time Scanning",
+                      desc: "Checks prices every 30 minutes across all platforms",
+                    },
+                    {
+                      icon: Bell,
+                      title: "Smart Alerts",
+                      desc: "Notifies only when significant price drops occur",
+                    },
+                    {
+                      icon: BarChart3,
+                      title: "Historical Analysis",
+                      desc: "Shows complete 90-day price trends and predictions",
+                    },
+                  ].map((item, i) => (
+                    <motion.div
+                      key={i}
+                      variants={slideL}
+                      whileHover={{ x: 6 }}
+                      className="flex items-start gap-3 p-3 rounded-xl hover:bg-blue-50/60 transition-colors duration-200 cursor-default"
+                    >
+                      <motion.div
+                        className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#0167ff] to-[#34c759] flex items-center justify-center shrink-0 shadow-sm"
+                        whileHover={{ rotate: 360 }}
+                        transition={{ duration: 0.5 }}
+                      >
+                        <item.icon className="w-4 h-4 text-white" />
+                      </motion.div>
+                      <div>
+                        <p className="text-sm font-bold text-gray-900">
+                          {item.title}
+                        </p>
+                        <p className="text-xs text-gray-500">{item.desc}</p>
+                      </div>
+                    </motion.div>
+                  ))}
+                </motion.div>
+              </motion.div>
+
+              <AIScannerVisual />
+            </div>
+          </div>
+        </section>
+
+        {/* ══════════════════ PLATFORMS ══════════════════ */}
+        <section className="py-16 md:py-20 bg-white overflow-hidden">
+          <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+            <motion.div
+              initial="hidden"
+              whileInView="show"
+              viewport={{ once: true }}
+              variants={stagger}
+              className="text-center mb-10"
+            >
+              <h2 className="text-2xl sm:text-3xl font-black text-gray-900 mb-2.5">
+                <AnimatedWords text="We Track Prices Across India's Top Platforms" />
+              </h2>
+              <motion.p variants={blurUp} className="text-sm text-gray-500">
+                Automatically compare prices from multiple e-commerce sites
+              </motion.p>
+            </motion.div>
+
+            <motion.div
+              initial="hidden"
+              whileInView="show"
+              viewport={{ once: true }}
+              variants={stagger}
+              className="grid grid-cols-2 md:grid-cols-3 gap-4 max-w-2xl mx-auto"
+            >
+              {platforms.map((p, i) => (
+                <motion.div
+                  key={i}
+                  variants={scaleUp}
+                  whileHover={{
+                    y: -8,
+                    scale: 1.04,
+                    boxShadow: `0 20px 40px ${p.color}25`,
+                  }}
+                  transition={{ type: "spring", stiffness: 280, damping: 18 }}
+                  className="relative p-5 rounded-2xl bg-white border-2 border-gray-100 hover:border-[#0167ff]/30 shadow-sm transition-all duration-300"
+                >
+                  <div className="aspect-video flex items-center justify-center mb-3">
+                    {p.logo ? (
+                      <Image
+                        src={p.logo}
+                        alt={p.name}
+                        width={90}
+                        height={32}
+                        className="object-contain"
+                      />
+                    ) : (
+                      <span
+                        className="text-2xl font-black"
+                        style={{ color: p.color }}
+                      >
+                        {p.name[0]}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs font-bold text-gray-900 text-center">
+                    {p.name}
+                  </p>
+                  <p className="text-[10px] text-gray-400 text-center mt-0.5">
+                    Price Tracking Active
+                  </p>
+                  <motion.div
+                    className="absolute -top-2 -right-2 w-5 h-5 bg-[#34c759] rounded-full flex items-center justify-center shadow"
+                    animate={{ scale: [1, 1.2, 1] }}
+                    transition={{
+                      repeat: Infinity,
+                      duration: 2,
+                      delay: i * 0.5,
+                    }}
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5 text-white" />
+                  </motion.div>
+                </motion.div>
+              ))}
+            </motion.div>
+          </div>
+        </section>
+
+        {/* ══════════════════ FEATURES ══════════════════ */}
+        <section className="py-16 md:py-20 bg-gradient-to-br from-gray-50 to-blue-50/30 relative overflow-hidden">
+          <FloatingParticles count={10} color="#34c759" />
+          <div className="container mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+            <motion.div
+              initial="hidden"
+              whileInView="show"
+              viewport={{ once: true }}
+              variants={stagger}
+              className="text-center max-w-2xl mx-auto mb-10"
+            >
+              <h2 className="text-2xl sm:text-3xl font-black text-gray-900 mb-2.5">
+                <AnimatedWords text="Powerful Features Built for Smart Shoppers" />
+              </h2>
+              <motion.p variants={blurUp} className="text-sm text-gray-500">
+                Everything you need to never overpay again
+              </motion.p>
+            </motion.div>
+
+            <motion.div
+              initial="hidden"
+              whileInView="show"
+              viewport={{ once: true }}
+              variants={stagger}
+              className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4"
+            >
+              {features.map((f, i) => (
+                <motion.div
+                  key={i}
+                  variants={blurUp}
+                  whileHover={{ y: -6 }}
+                  className="group p-5 rounded-2xl bg-white border border-gray-100 hover:border-[#0167ff]/20 hover:shadow-xl transition-all duration-300"
+                >
+                  <motion.div
+                    className={`w-10 h-10 rounded-xl bg-gradient-to-br ${f.grad} flex items-center justify-center mb-3.5 shadow-sm`}
+                    whileHover={{ rotate: 12, scale: 1.15 }}
+                    transition={{ type: "spring", stiffness: 300 }}
+                  >
+                    <f.icon className="w-5 h-5 text-white" />
+                  </motion.div>
+                  <h3 className="text-sm font-bold text-gray-900 mb-1.5">
+                    {f.title}
+                  </h3>
+                  <p className="text-xs text-gray-500 leading-relaxed">
+                    {f.description}
+                  </p>
+                </motion.div>
+              ))}
+            </motion.div>
+          </div>
+        </section>
+
+        {/* ══════════════════ CTA ══════════════════ */}
+        <section className="py-16 md:py-20 bg-white">
+          <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+            <motion.div
+              initial="hidden"
+              whileInView="show"
+              viewport={{ once: true }}
+              variants={scaleUp}
+              className="max-w-4xl mx-auto"
+            >
+              <div className="relative p-8 md:p-12 rounded-3xl bg-gradient-to-br from-[#0040cc] via-[#0167ff] to-[#0185ff] text-white overflow-hidden">
+                <FloatingParticles count={18} color="#ffffff" />
+                <div
+                  className="pointer-events-none absolute inset-0 opacity-10"
+                  style={{
+                    backgroundImage:
+                      "linear-gradient(white 1px,transparent 1px),linear-gradient(90deg,white 1px,transparent 1px)",
+                    backgroundSize: "28px 28px",
+                  }}
+                />
+                <ParallaxLayer
+                  speed={0.5}
+                  className="absolute -top-24 -right-24 w-64 h-64 pointer-events-none"
+                >
+                  <motion.div
+                    animate={{ scale: [1, 1.2, 1] }}
+                    transition={{
+                      repeat: Infinity,
+                      duration: 8,
+                      ease: "easeInOut",
+                    }}
+                    className="w-full h-full bg-white/10 rounded-full blur-3xl"
+                  />
+                </ParallaxLayer>
+                <ParallaxLayer
+                  speed={0.3}
+                  className="absolute -bottom-24 -left-24 w-64 h-64 pointer-events-none"
+                >
+                  <motion.div
+                    animate={{ scale: [1, 1.2, 1] }}
+                    transition={{
+                      repeat: Infinity,
+                      duration: 10,
+                      ease: "easeInOut",
+                      delay: 2,
+                    }}
+                    className="w-full h-full bg-[#34c759]/15 rounded-full blur-3xl"
+                  />
+                </ParallaxLayer>
+
+                <div className="relative z-10 text-center">
+                  <motion.div
+                    animate={{ rotate: [0, 12, -12, 0] }}
+                    transition={{
+                      repeat: Infinity,
+                      duration: 4,
+                      ease: "easeInOut",
+                    }}
+                    className="inline-flex w-12 h-12 bg-white/15 backdrop-blur rounded-xl items-center justify-center mx-auto mb-5"
+                  >
+                    <Sparkles className="w-6 h-6 text-yellow-300" />
+                  </motion.div>
+
+                  <h2 className="text-2xl sm:text-3xl font-black mb-3">
+                    <AnimatedWords
+                      text="Ready to Start Saving Money?"
+                      className="text-white"
+                    />
+                  </h2>
+
+                  <motion.p
+                    initial={{ opacity: 0 }}
+                    whileInView={{ opacity: 1 }}
+                    viewport={{ once: true }}
+                    transition={{ delay: 0.4 }}
+                    className="text-sm text-white/85 mb-7 max-w-xl mx-auto"
+                  >
+                    Join 2 million+ smart shoppers who never pay full price.
+                    100% free, forever.
+                  </motion.p>
+
+                  <motion.div
+                    initial={{ opacity: 0, y: 16 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true }}
+                    transition={{ delay: 0.5 }}
+                    className="flex flex-col sm:flex-row items-center justify-center gap-3 mb-6"
+                  >
+                    <Link
+                      href="/signup"
+                      className="group w-full sm:w-auto inline-flex items-center justify-center gap-2 px-7 py-2.5 bg-white text-[#0167ff] text-sm font-bold rounded-xl shadow-2xl hover:scale-105 active:scale-95 transition-all duration-200"
+                    >
+                      Get Started Free
+                      <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                    </Link>
+                    <Link
+                      href="/"
+                      className="w-full sm:w-auto px-7 py-2.5 bg-white/10 backdrop-blur text-white text-sm font-bold rounded-xl border border-white/30 hover:bg-white/20 active:scale-95 transition-all duration-200"
+                    >
+                      Search Products
+                    </Link>
+                  </motion.div>
+
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    whileInView={{ opacity: 1 }}
+                    viewport={{ once: true }}
+                    transition={{ delay: 0.65 }}
+                    className="flex flex-wrap items-center justify-center gap-5 text-xs text-white/70"
+                  >
+                    {["No credit card", "Free forever", "2M+ users"].map(
+                      (t, i) => (
+                        <div key={i} className="flex items-center gap-1.5">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-[#34c759]" />
+                          <span>{t}</span>
+                        </div>
+                      ),
+                    )}
+                  </motion.div>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        </section>
       </div>
-    </div>
-  ) : null;
+    </>
+  );
 }
-
