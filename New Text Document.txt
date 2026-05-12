@@ -1,0 +1,135 @@
+import React, { useMemo } from "react";
+import { FaExclamationTriangle } from "react-icons/fa";
+import { MdSkipNext, MdSwapHoriz, MdContentCopy } from "react-icons/md";
+import { FiFile, FiHardDrive } from "react-icons/fi";
+import Modal from "../Common/Modal";
+
+const DuplicateFilesModal = ({
+  isOpen,
+  files = [],
+  onClose,
+  onSkip,
+  onReplace,
+  onKeepBoth,
+  originalImg,
+}) => {
+  // Calculate total size
+  const totalSize = useMemo(() => {
+    return files.reduce((sum, file) => {
+      const size = originalImg ? file.originalSize : file.size;
+      return sum + (parseFloat(size) || 0);
+    }, 0);
+  }, [files, originalImg]);
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      closeOnOutsideClick={false}
+      className="bg-white rounded-2xl shadow-2xl max-w-lg w-full mx-4 overflow-hidden"
+      positionClass="items-center justify-center"
+    >
+      <div className="flex flex-col">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-primary to-[#2a2640] text-white px-3 py-3 relative">
+          <div className="flex items-center space-x-3">
+            <div className="p-2 sm:p-3 bg-secondary rounded-full flex-shrink-0">
+              <FaExclamationTriangle className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h2 className="text-lg lg:text-xl font-bold mb-1">
+                Duplicate Files Found
+              </h2>
+              <p className="text-white/80 text-sm">
+                Files already exist in this album
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="px-4 sm:px-6 py-4 sm:py-6">
+          {/* Summary Cards */}
+          <div className="grid grid-cols-2 gap-3 sm:gap-4 mb-6">
+            <div className="bg-gradient-to-br from-primary/5 to-primary/10 rounded-xl p-3 sm:p-4 border border-primary/10">
+              <div className="flex items-center gap-2 sm:gap-3">
+                <div className="p-2 bg-secondary/20 rounded-lg">
+                  <FiFile className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-xl sm:text-2xl font-bold text-primary">
+                    {files.length}
+                  </div>
+                  <div className="text-xs sm:text-sm text-gray-600">
+                    {files.length === 1 ? "File" : "Files"}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-gradient-to-br from-secondary/10 to-secondary/20 rounded-xl p-3 sm:p-4 border border-secondary/30">
+              <div className="flex items-center gap-2 sm:gap-3">
+                <div className="p-2 bg-secondary/30 rounded-lg">
+                  <FiHardDrive className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-xl sm:text-2xl font-bold text-primary">
+                    {totalSize.toFixed(1)}
+                  </div>
+                  <div className="text-xs sm:text-sm text-gray-600">
+                    MB Total
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Description */}
+          <div className="mb-3">
+            <p className="text-gray-600 text-center text-sm sm:text-base">
+              How would you like to proceed with these duplicate files?
+            </p>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 md:gap-3">
+            <button
+              onClick={() => {
+                onSkip();
+                onClose();
+              }}
+              className="flex items-center justify-center space-x-2 p-1.5 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-colors duration-200 font-medium text-sm sm:text-base"
+            >
+              <MdSkipNext className="w-4 h-4 sm:w-5 sm:h-5" />
+              <span>Skip All</span>
+            </button>
+
+            <button
+              onClick={() => {
+                onReplace();
+                onClose();
+              }}
+              className="flex items-center justify-center space-x-2 p-1.5 bg-primary text-white rounded-xl hover:bg-[#2a2640] transition-colors duration-200 font-medium text-sm sm:text-base"
+            >
+              <MdSwapHoriz className="w-4 h-4 sm:w-5 sm:h-5" />
+              <span>Replace All</span>
+            </button>
+
+            <button
+              onClick={() => {
+                onKeepBoth();
+                onClose();
+              }}
+              className="flex items-center justify-center space-x-2 p-1.5 bg-secondary text-white rounded-xl hover:bg-[#c9b085] transition-colors duration-200 font-medium text-sm sm:text-base"
+            >
+              <MdContentCopy className="w-4 h-4 sm:w-5 sm:h-5" />
+              <span>Keep Both</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
+export default DuplicateFilesModal;

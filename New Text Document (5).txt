@@ -1,0 +1,148 @@
+import { cx } from "@/src/utils";
+import React, { useState, useCallback, useMemo } from "react";
+import { FiHardDrive, FiImage, FiUpload } from "react-icons/fi";
+
+const UploadButton = ({ label, icon, className, onChange }) => (
+  <label className={`w-full sm:w-auto ${className}`}>
+    {icon}
+    <span>{label}</span>
+    <input
+      type="file"
+      multiple
+      accept="image/*"
+      onChange={onChange}
+      className="hidden"
+    />
+  </label>
+);
+
+const UploadSection = ({
+  currentAlbum,
+  handleFileChange,
+  maxImageSize,
+  totalLimit = 0,
+  totalUsed = 0,
+  isPhotoBased,
+}) => {
+  const [isDragging, setIsDragging] = useState(false);
+
+  const handleDragEvent = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDragIn = useCallback(
+    (e) => {
+      handleDragEvent(e);
+      if (e.dataTransfer.items?.length) setIsDragging(true);
+    },
+    [handleDragEvent],
+  );
+
+  const handleDragOut = handleDragEvent;
+
+  const handleDrop = useCallback(
+    (e) => {
+      handleDragEvent(e);
+      setIsDragging(false);
+      if (e.dataTransfer.files?.length) {
+        handleFileChange({ target: { files: e.dataTransfer.files } });
+      }
+    },
+    [handleDragEvent, handleFileChange],
+  );
+
+  const uploadButtons = useMemo(
+    () => [
+      {
+        label: "Select",
+        icon: <FiImage className="text-sm" />,
+        className:
+          "bg-primary text-white px-3 py-2 rounded-lg cursor-pointer hover:bg-opacity-90 text-sm flex items-center justify-center gap-1.5 transition shadow-sm hover:shadow",
+      },
+      {
+        label: "Drop Files",
+        icon: <FiUpload className="text-sm" />,
+        className:
+          "bg-gradient-to-r from-secondary to-[#e8d4a6] text-primary px-3 py-2 rounded-lg cursor-pointer hover:from-[#c9b085] hover:to-secondary text-sm font-medium flex items-center justify-center gap-1.5 transition shadow-sm hover:shadow",
+      },
+    ],
+    [],
+  );
+
+  return (
+    <div className="relative bg-white rounded-lg shadow-sm transition-all mb-2">
+      {/* Album Header Section */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 px-3 py-1 border-t border-x border-gray-200 rounded-t">
+        <div>
+          <h2 className="text-lg font-bold text-primary">
+            {currentAlbum.albumName}
+          </h2>
+        </div>
+        <div className="flex gap-3 text-xs text-gray-600">
+          <div className="flex items-center gap-1">
+            <FiImage className="text-secondary text-sm" />
+            {currentAlbum.totalImages || 0} photos
+          </div>
+          <div className="flex items-center gap-1">
+            <FiHardDrive className="text-secondary text-sm" />
+            {isPhotoBased ? (
+              // photo_count plan: show used photos out of limit
+              <span>
+                {totalUsed} / {totalLimit} photos
+              </span>
+            ) : (
+              // mb_based plan: show MB as before
+              <span>{currentAlbum?.totalMBUsed?.toFixed(2)} MB</span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div
+        onDragEnter={handleDragIn}
+        onDragLeave={handleDragOut}
+        onDragOver={handleDragEvent}
+        onDrop={handleDrop}
+        className={cx(
+          "p-3 border-2 border-dashed rounded-b-lg relative",
+          isDragging
+            ? "border-secondary bg-[#fff9e6]"
+            : "border-gray-200 hover:border-secondary",
+        )}
+      >
+        {/* Upload Section */}
+        <div className="mb-2 flex justify-center  items-center gap-2 w-full sm:w-auto">
+          {uploadButtons.map((btn, idx) => (
+            <UploadButton key={idx} {...btn} onChange={handleFileChange} />
+          ))}
+        </div>
+
+        {isDragging && (
+          <div className="absolute inset-0 bg-secondary/10 backdrop-blur-[2px] rounded-lg flex items-center justify-center">
+            <div className="text-center p-3">
+              <FiUpload size={20} className="mx-auto mb-1 text-primary" />
+              <p className="text-primary font-medium text-sm">
+                Drop files here
+              </p>
+            </div>
+          </div>
+        )}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-1 text-xs text-gray-500">
+          <p>JPG, PNG, JPEG supported</p>
+          <p className="text-red-500 font-medium">
+            *Select files or drag and drop. You can upload up to 1000 images at
+            once.*
+          </p>
+          <p>
+            {isPhotoBased
+              ? `Limit: ${totalLimit} photos`
+              : `Max: ${maxImageSize}MB per image`}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default UploadSection;

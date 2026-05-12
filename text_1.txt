@@ -1,844 +1,279 @@
-"use client";
-import { useEffect, useState } from "react";
-import { useDispatch, useSelector } from "react-redux";
-import { io } from "socket.io-client";
-import { useRootData } from "@/src/context/rootContext";
+import Link from "next/link";
+import React, { useMemo, useState } from "react";
 import {
-  fetchCameras,
-  createCameraToken,
-  assignCameraEventAlbum,
-  toggleCameraUpload,
-  deleteCameraToken,
-} from "@/src/redux/features/camera/camerasThunks";
-import {
-  clearNewCredentials,
-  socketCameraConnected,
-  socketCameraDisconnected,
-  socketCameraUpdated,
-} from "@/src/redux/features/camera/cameraSlice";
-import { fetchEvents } from "@/src/redux/features/event/eventThunks";
-import config from "@/src/config/config";
-import { fetchAlbums } from "@/src/redux/features/album/albumThunks";
+  FiFolder,
+  FiImage,
+  FiChevronLeft,
+  FiSettings,
+  FiShare2,
+  FiCalendar,
+  FiClock,
+  FiMoreHorizontal,
+  FiX,
+  FiMapPin,
+  FiShield,
+  FiLayers,
+} from "react-icons/fi";
 
-const API = config.base.url;
-
-// ── Skeleton Card ─────────────────────────────────────────────
-function CameraCardSkeleton() {
-  return (
-    <div className="bg-white rounded-xl border-2 border-gray-100 p-4 shadow-sm animate-pulse">
-      <div className="flex justify-between items-start mb-3">
-        <div className="flex-1">
-          <div className="h-4 bg-gray-200 rounded w-3/4 mb-2" />
-          <div className="h-3 bg-gray-100 rounded w-1/2" />
-        </div>
-        <div className="flex items-center gap-2 ml-2">
-          <div className="w-2.5 h-2.5 rounded-full bg-gray-200" />
-          <div className="h-3 bg-gray-200 rounded w-12" />
-        </div>
-      </div>
-      <div className="space-y-2 mb-3">
-        <div className="h-9 bg-gray-100 rounded-lg w-full" />
-        <div className="h-9 bg-gray-100 rounded-lg w-full" />
-        <div className="h-8 bg-gray-100 rounded-lg w-full" />
-      </div>
-      <div className="flex items-center justify-between pt-3 border-t border-gray-100">
-        <div className="h-3 bg-gray-200 rounded w-20" />
-        <div className="h-6 w-11 bg-gray-200 rounded-full" />
-      </div>
-    </div>
-  );
-}
-
-// ── Main Page ─────────────────────────────────────────────────
-export default function CamerasPage() {
-  const dispatch = useDispatch();
-  const { user } = useRootData();
-
-  // ✅ Redux state
-  const { cameras, loading, actionLoading, error, newCredentials } =
-    useSelector((state) => state.camera);
-
-  // ✅ eventsLoading from event slice
-  const { events, loading: eventsLoading } = useSelector(
-    (state) => state.event,
-  );
-
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [showCredentialsModal, setShowCredentialsModal] = useState(false);
-  const [newCameraName, setNewCameraName] = useState("");
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [deletingTokenId, setDeletingTokenId] = useState(null);
-
-  // ✅ Load cameras + events on mount
-  useEffect(() => {
-    dispatch(fetchCameras({ paginate: false }));
-    dispatch(fetchEvents({ paginate: false }));
-  }, [dispatch]);
-
-  // ✅ Open credentials modal when token is created
-  useEffect(() => {
-    if (newCredentials) setShowCredentialsModal(true);
-  }, [newCredentials]);
-
-  // ✅ Socket.IO — real-time camera status
-  useEffect(() => {
-    if (!user?._id) return;
-
-    const socket = io(API, { withCredentials: true });
-
-    socket.on("connect", () => {
-      socket.emit("join_client_room", { enterpriseClientId: user._id });
-    });
-
-    socket.on("camera_connected", (data) => {
-      dispatch(socketCameraConnected(data));
-    });
-
-    socket.on("camera_disconnected", (data) => {
-      dispatch(socketCameraDisconnected(data));
-    });
-
-    socket.on("camera_updated", (data) => {
-      dispatch(socketCameraUpdated(data));
-    });
-
-    return () => socket.disconnect();
-  }, [user?._id, dispatch]);
-
-  const handleAddCamera = () => {
-    if (!newCameraName.trim()) return;
-    dispatch(createCameraToken({ formData: { tokenName: newCameraName } }));
-    setNewCameraName("");
-    setShowAddModal(false);
-  };
-
-  const handleAssign = (
-    cameraConnectionId,
-    assignedEventId,
-    assignedAlbumId,
-  ) => {
-    dispatch(
-      assignCameraEventAlbum({
-        formData: { cameraConnectionId, assignedEventId, assignedAlbumId },
-      }),
-    );
-  };
-
-  const handleToggle = (cameraConnectionId) => {
-    dispatch(toggleCameraUpload({ cameraConnectionId }));
-  };
-
-  const handleDelete = (tokenId) => {
-    setDeletingTokenId(tokenId);
-    setShowDeleteModal(true);
-  };
-
-  const confirmDelete = () => {
-    dispatch(deleteCameraToken({ id: deletingTokenId, setShowDeleteModal }));
-  };
-
-  // ✅ Full page loader — only on initial cameras load
-  if (loading) {
-    return (
-      <div className="p-6">
-        {/* Header skeleton */}
-        <div className="flex justify-between items-center mb-6">
-          <div>
-            <div className="h-7 bg-gray-200 rounded w-32 mb-2 animate-pulse" />
-            <div className="h-4 bg-gray-100 rounded w-48 animate-pulse" />
-          </div>
-          <div className="h-9 w-32 bg-gray-200 rounded-lg animate-pulse" />
-        </div>
-        {/* Skeleton cards grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {[1, 2, 3].map((i) => (
-            <CameraCardSkeleton key={i} />
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="p-6">
-      {/* ── Header ── */}
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-primary">Cameras</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
-            {cameras.filter((c) => c.isOnline).length} online · {cameras.length}{" "}
-            total
-          </p>
-        </div>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium hover:opacity-90 transition"
-        >
-          + Add Camera
-        </button>
-      </div>
-
-      {/* ── Error ── */}
-      {error && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg">
-          {error}
-        </div>
-      )}
-
-      {/* ── Camera Grid ── */}
-      {cameras.length === 0 ? (
-        <div className="text-center py-20 text-gray-400">
-          <p className="text-5xl mb-4">📷</p>
-          <p className="text-lg font-medium">No cameras added yet</p>
-          <p className="text-sm mt-1">
-            Click &quot;Add Camera&quot; to generate FTP credentials.
-          </p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {cameras.map((cam) => (
-            <CameraCard
-              key={cam._id}
-              camera={cam}
-              events={events}
-              eventsLoading={eventsLoading} // ✅ pass eventsLoading
-              actionLoading={actionLoading}
-              onAssign={handleAssign}
-              onToggle={handleToggle}
-              onDelete={handleDelete}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* ── Add Camera Modal ── */}
-      {showAddModal && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center">
-          <div className="bg-white rounded-xl p-6 w-full max-w-sm shadow-xl">
-            <h2 className="text-lg font-semibold text-primary mb-4">
-              Add New Camera
-            </h2>
-            <input
-              type="text"
-              value={newCameraName}
-              onChange={(e) => setNewCameraName(e.target.value)}
-              placeholder="e.g. Canon R5 - Main Camera"
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-primary"
-              onKeyDown={(e) => e.key === "Enter" && handleAddCamera()}
-              autoFocus
-            />
-            <div className="flex gap-2">
-              <button
-                onClick={() => {
-                  setShowAddModal(false);
-                  setNewCameraName("");
-                }}
-                className="flex-1 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleAddCamera}
-                disabled={actionLoading || !newCameraName.trim()}
-                className="flex-1 py-2 bg-primary text-white rounded-lg text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                {actionLoading ? (
-                  <>
-                    <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    Creating...
-                  </>
-                ) : (
-                  "Generate Credentials"
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── FTP Credentials Modal ── */}
-      {showCredentialsModal && newCredentials && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl">
-            <h2 className="text-lg font-semibold text-primary mb-2">
-              📷 Camera FTP Credentials
-            </h2>
-            <p className="text-xs text-gray-500 mb-4">
-              Enter these settings in your camera&apos;s WiFi/FTP menu. Save
-              them — password won&apos;t be shown again.
-            </p>
-            <div className="bg-gray-50 rounded-lg p-4 space-y-2.5 text-sm font-mono border border-gray-100">
-              {[
-                { label: "Host", value: newCredentials?.ftpCredentials?.host },
-                { label: "Port", value: newCredentials?.ftpCredentials?.port },
-                {
-                  label: "Username",
-                  value: newCredentials?.ftpCredentials?.username,
-                },
-                {
-                  label: "Password",
-                  value: newCredentials?.ftpCredentials?.password,
-                },
-              ].map(({ label, value }) => (
-                <div key={label} className="flex justify-between items-center">
-                  <span className="text-gray-500">{label}:</span>
-                  <span className="font-semibold text-primary select-all">
-                    {value}
-                  </span>
-                </div>
-              ))}
-            </div>
-            <div className="mt-4 p-3 bg-blue-50 rounded-lg text-xs text-blue-700 space-y-1">
-              <p>
-                📷 <strong>Canon:</strong> Menu → Network → FTP Transfer
-                Settings
-              </p>
-              <p>
-                📷 <strong>Nikon:</strong> Menu → Network → Connect to FTP
-                Server
-              </p>
-              <p>
-                📷 <strong>Sony:</strong> Menu → Network → FTP Transfer Func.
-              </p>
-              <p>
-                📷 <strong>Fujifilm:</strong> Menu → Wireless Settings → FTP
-                Uploading
-              </p>
-            </div>
-            <button
-              onClick={() => {
-                setShowCredentialsModal(false);
-                dispatch(clearNewCredentials());
-              }}
-              className="w-full mt-4 py-2 bg-primary text-white rounded-lg text-sm font-medium hover:opacity-90 transition"
-            >
-              Done
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── Delete Confirm Modal ── */}
-      {showDeleteModal && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center">
-          <div className="bg-white rounded-xl p-6 w-full max-w-sm shadow-xl">
-            <h2 className="text-lg font-semibold text-primary mb-2">
-              Remove Camera?
-            </h2>
-            <p className="text-sm text-gray-500 mb-4">
-              This will delete the FTP credentials and disconnect the camera.
-            </p>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setShowDeleteModal(false)}
-                className="flex-1 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmDelete}
-                disabled={actionLoading}
-                className="flex-1 py-2 bg-red-500 text-white rounded-lg text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                {actionLoading ? (
-                  <>
-                    <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    Removing...
-                  </>
-                ) : (
-                  "Remove"
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Camera Card ───────────────────────────────────────────────
-function CameraCard({
-  camera,
-  events,
-  eventsLoading,
-  actionLoading,
-  onAssign,
-  onToggle,
-  onDelete,
-}) {
-  const dispatch = useDispatch();
-
-  // ✅ Albums from Redux
-  const { albums, loading: albumLoading } = useSelector((state) => state.album);
-
-  const [selectedEvent, setSelectedEvent] = useState(
-    camera.assignedEventId?._id || "",
-  );
-  const [selectedAlbum, setSelectedAlbum] = useState(
-    camera.assignedAlbumId?._id || "",
-  );
-
-  // ✅ Load albums if camera already has an assigned event on mount
-  useEffect(() => {
-    if (camera.assignedEventId?._id) {
-      dispatch(
-        fetchAlbums({ eventId: camera.assignedEventId._id, paginate: false }),
-      );
-    }
-  }, [camera.assignedEventId?._id, dispatch]);
-
-  const handleEventChange = (e) => {
-    const eventId = e.target.value;
-    setSelectedEvent(eventId);
-    setSelectedAlbum("");
-    if (eventId) {
-      // ✅ Dispatch Redux fetchAlbums
-      dispatch(fetchAlbums({ eventId, paginate: false }));
-    }
-  };
-
-  const handleSave = () => {
-    if (!selectedEvent || !selectedAlbum) return;
-    onAssign(camera._id, selectedEvent, selectedAlbum);
-  };
-
-  return (
-    <div
-      className={`bg-white rounded-xl border-2 p-4 shadow-sm transition-all duration-300 ${
-        camera.isOnline ? "border-green-400" : "border-gray-200"
+const InfoItem = ({ icon: Icon, label, value, highlight = false }) => (
+  <div
+    className={`flex items-center gap-1 px-2 py-1 rounded-lg ${
+      highlight ? "bg-secondary/10 border border-secondary/20" : "bg-gray-50"
+    }`}
+  >
+    <Icon className="text-secondary text-sm flex-shrink-0" />
+    <span
+      className={`text-xs font-medium truncate ${
+        highlight ? "text-primary" : "text-third"
       }`}
     >
-      {/* ── Card Header ── */}
-      <div className="flex justify-between items-start mb-3">
-        <div className="flex-1 min-w-0">
-          <h3 className="font-semibold text-primary truncate">
-            {camera.tokenName}
-          </h3>
-          <p className="text-xs text-gray-400">
-            {camera.cameraIP || "Not connected"}
-          </p>
-        </div>
-        <div className="flex items-center gap-2 ml-2">
-          <div className="flex items-center gap-1">
-            <span
-              className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
-                camera.isOnline ? "bg-green-500 animate-pulse" : "bg-gray-300"
-              }`}
-            />
-            <span
-              className={`text-xs font-medium ${
-                camera.isOnline ? "text-green-600" : "text-gray-400"
-              }`}
-            >
-              {camera.isOnline ? "Online" : "Offline"}
-            </span>
-          </div>
-          <button
-            onClick={() => onDelete(camera.cameraTokenId || camera._id)}
-            className="text-gray-300 hover:text-red-400 transition text-xl leading-none"
-            title="Remove camera"
-          >
-            ×
-          </button>
-        </div>
-      </div>
+      {value}
+    </span>
+    <span className="text-xs text-gray-500 flex-shrink-0">{label}</span>
+  </div>
+);
 
-      {/* ── Selectors ── */}
-      <div className="space-y-2 mb-3">
-        {/* Event Dropdown */}
-        <div className="relative">
-          <select
-            value={selectedEvent}
-            onChange={handleEventChange}
-            disabled={eventsLoading}
-            className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-primary focus:outline-none disabled:opacity-50 disabled:cursor-wait appearance-none"
-          >
-            <option value="">
-              {eventsLoading ? "Loading events..." : "— Select Event —"}
-            </option>
-            {!eventsLoading &&
-              events?.map((ev) => (
-                <option key={ev._id} value={ev._id}>
-                  {ev.eventName}
-                </option>
-              ))}
-          </select>
-          {eventsLoading && (
-            <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
-              <span className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin block" />
-            </div>
-          )}
-        </div>
+const ActionButton = ({ icon: Icon, label, href }) => (
+  <Link
+    href={href}
+    passHref
+    className="bg-gradient-to-r from-secondary to-[#e8d4a6] text-primary px-2 py-1 rounded-lg font-medium hover:from-[#c9b085] hover:to-secondary transition-all flex items-center gap-1 shadow-sm hover:shadow-md text-xs"
+    aria-label={label}
+    title={label}
+  >
+    <Icon className="text-sm" />
+    <span className="inline">{label}</span>
+  </Link>
+);
 
-        {/* Album Dropdown */}
-        <div className="relative">
-          <select
-            value={selectedAlbum}
-            onChange={(e) => setSelectedAlbum(e.target.value)}
-            disabled={!selectedEvent || albumLoading}
-            className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 text-primary focus:outline-none disabled:opacity-50 disabled:cursor-wait appearance-none"
-          >
-            <option value="">
-              {albumLoading ? "Loading albums..." : "— Select Album —"}
-            </option>
-            {!albumLoading &&
-              albums?.map((al) => (
-                <option key={al._id} value={al._id}>
-                  {al.albumName}
-                </option>
-              ))}
-          </select>
-          {albumLoading && (
-            <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
-              <span className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin block" />
-            </div>
-          )}
-        </div>
+const Header = ({
+  oneEvent,
+  sidebarVisible,
+  setSidebarVisible,
+  storageType,
+  packageLimit = 0,
+  isPhotoBased,
+}) => {
+  const [showStatsModal, setShowStatsModal] = useState(false);
 
-        {/* Save Button */}
-        <button
-          onClick={handleSave}
-          disabled={
-            !selectedEvent || !selectedAlbum || actionLoading || albumLoading
-          }
-          className="w-full py-1.5 text-xs font-medium bg-secondary text-white rounded-lg disabled:opacity-50 hover:opacity-90 transition flex items-center justify-center gap-2"
-        >
-          {actionLoading ? (
-            <>
-              <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              Saving...
-            </>
-          ) : (
-            "Save Assignment"
-          )}
-        </button>
-      </div>
-
-      {/* ── Current Assignment ── */}
-      {camera.assignedEventId && camera.assignedAlbumId && (
-        <p className="text-xs text-green-600 mb-3 bg-green-50 px-2 py-1 rounded-lg">
-          ✅ {camera.assignedEventId?.eventName} →{" "}
-          {camera.assignedAlbumId?.albumName}
-        </p>
-      )}
-
-      {/* ── Auto Upload Toggle ── */}
-      <div className="flex items-center justify-between pt-3 border-t border-gray-100">
-        <div>
-          <span className="text-xs font-medium text-gray-600">Auto Upload</span>
-          <p className="text-xs text-gray-400">
-            {camera.isUploadEnabled ? "Photos uploading" : "Upload paused"}
-          </p>
-        </div>
-        <button
-          onClick={() => onToggle(camera._id)}
-          disabled={actionLoading}
-          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 disabled:opacity-50 ${
-            camera.isUploadEnabled ? "bg-green-500" : "bg-gray-300"
-          }`}
-        >
-          <span
-            className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform duration-200 ${
-              camera.isUploadEnabled ? "translate-x-6" : "translate-x-1"
-            }`}
-          />
-        </button>
-      </div>
-
-      <p className="text-xs text-gray-400 mt-2 text-right">
-        {camera.totalUploaded || 0} photos uploaded
-      </p>
-    </div>
+  const actions = useMemo(
+    () => [
+      {
+        icon: FiSettings,
+        label: "Settings",
+        value: "settings",
+        href: `/event/${oneEvent?._id}/settings`,
+      },
+      {
+        icon: FiShare2,
+        label: "Share",
+        value: "share",
+        href: `/common-qr?event_id=${oneEvent?._id}`,
+      },
+    ],
+    [oneEvent],
   );
-}
 
+  // Format dates properly
+  const formatEventDate = (dateString) => {
+    if (!dateString) return "N/A";
+    const date = new Date(dateString);
+    return date.toLocaleDateString("en-US", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  };
 
+  const stats = useMemo(
+    () => [
+      {
+        icon: FiFolder,
+        label: "Albums",
+        value: oneEvent?.totalAlbums || 0,
+        highlight: (oneEvent?.totalAlbums || 0) > 0,
+      },
+      {
+        icon: FiImage,
+        label: "Photos",
+        value: oneEvent?.totalPhotos || 0,
+        highlight: (oneEvent?.totalPhotos || 0) > 0,
+      },
+    ],
+    [oneEvent],
+  );
 
+  const eventDetails = useMemo(
+    () => [
+      {
+        icon: FiCalendar,
+        label: "Start",
+        value: formatEventDate(oneEvent?.eventStartDate),
+      },
+      {
+        icon: FiClock,
+        label: "End",
+        value: formatEventDate(oneEvent?.eventEndDate),
+      },
+      {
+        icon: FiMapPin,
+        label: "Location",
+        value: oneEvent?.location || "N/A",
+      },
+    ],
+    [oneEvent],
+  );
 
-import { createSlice } from "@reduxjs/toolkit";
-import {
-  fetchCameras,
-  createCameraToken,
-  assignCameraEventAlbum,
-  toggleCameraUpload,
-  deleteCameraToken,
-} from "./camerasThunks";
+  // Calculate storage percentage
+  const storagePercentage = useMemo(() => {
+    const used = isPhotoBased
+      ? oneEvent?.totalPhotos || 0
+      : oneEvent?.totalMBUsed || 0;
+    return packageLimit > 0 ? Math.min((used / packageLimit) * 100, 100) : 0;
+  }, [oneEvent, packageLimit, isPhotoBased]);
 
-const initialState = {
-  cameras: [],
-  newCredentials: null,
-  loading: false,
-  actionLoading: false,
-  error: null,
+  return (
+    <>
+      <header className="sticky top-0 z-20 bg-white/95 backdrop-blur-sm border-b border-gray-200/60 px-2 pb-2">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <button
+              onClick={() => setSidebarVisible(!sidebarVisible)}
+              className="xl:hidden flex items-center gap-2 flex-shrink-0 px-3 py-1.5 rounded-lg text-primary bg-gradient-to-r from-secondary/20 to-secondary/10 hover:from-secondary/30 hover:to-secondary/20 transition-all border border-secondary/30 hover:border-secondary/50"
+              aria-label={sidebarVisible ? "Hide sidebar" : "Show sidebar"}
+            >
+              <FiLayers className="text-base" />
+              <span className="text-sm font-medium">Albums</span>
+              <FiChevronLeft
+                className={`transition-transform duration-200 text-sm ${
+                  sidebarVisible ? "rotate-180" : ""
+                }`}
+              />
+            </button>
+            <div className="min-w-0 flex-1">
+              <h1 className="text-base font-semibold text-primary truncate">
+                {oneEvent?.eventName || "Event Name"}
+              </h1>
+              <p className="text-xs text-gray-500 line-clamp-1">
+                {oneEvent?.description || "No description available"}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setShowStatsModal(true)}
+              className="lg:hidden flex items-center gap-1 bg-gray-100 p-1.5 rounded-lg text-gray-700 hover:bg-secondary/10 hover:text-secondary transition-all"
+            >
+              <FiMoreHorizontal />
+              <span className="text-xs hidden sm:inline">Details</span>
+            </button>
+
+            <div className="hidden lg:flex gap-2">
+              {stats.map((item) => (
+                <InfoItem key={item.label} {...item} />
+              ))}
+            </div>
+
+            <div className="hidden sm:flex gap-1">
+              {actions.map((action) => (
+                <ActionButton key={action.value} {...action} />
+              ))}
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {showStatsModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl w-full max-w-sm p-4 animate-in fade-in shadow-xl">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-semibold text-lg text-primary">
+                Event Details
+              </h3>
+              <button
+                onClick={() => setShowStatsModal(false)}
+                className="p-1 rounded-full hover:bg-gray-100 text-primary transition-colors"
+              >
+                <FiX />
+              </button>
+            </div>
+
+            {/* Event Info */}
+            <div className="mb-4">
+              <h4 className="text-sm font-medium text-primary mb-2">
+                Event Information
+              </h4>
+              <div className="grid gap-2">
+                {eventDetails.map((item) => (
+                  <div
+                    key={item.label}
+                    className="flex items-center gap-2 bg-gray-50 p-2 rounded-lg"
+                  >
+                    <item.icon className="text-secondary text-base flex-shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <span className="text-xs text-gray-500 block">
+                        {item.label}
+                      </span>
+                      <span className="text-sm font-medium text-gray-700 truncate block">
+                        {item.value}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Statistics */}
+            <div className="mb-4">
+              <h4 className="text-sm font-medium text-primary mb-2">
+                Statistics
+              </h4>
+              <div className="grid gap-2">
+                {stats.map((item) => (
+                  <div
+                    key={item.label}
+                    className="flex items-center gap-2 bg-gray-50 p-2 rounded-lg"
+                  >
+                    <item.icon className="text-secondary text-base flex-shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <span className="text-xs text-gray-500 block">
+                        {item.label}
+                      </span>
+                      <span className="text-sm font-medium text-gray-700 truncate block">
+                        {item.value}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Storage Progress Bar */}
+              <div className="mt-2 bg-gray-200 rounded-full h-2">
+                <div
+                  className="bg-gradient-to-r from-secondary to-[#e8d4a6] h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${storagePercentage}%` }}
+                />
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                {storagePercentage.toFixed(1)}%{" "}
+                {isPhotoBased
+                  ? "of photo limit used"
+                  : "of package storage used"}
+              </p>
+            </div>
+
+            {/* Actions */}
+            <div className="grid grid-cols-2 gap-2">
+              {actions.map((action) => (
+                <ActionButton key={action.value} {...action} />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
 };
 
-const cameraSlice = createSlice({
-  name: "camera",
-  initialState,
-  reducers: {
-    clearError: (state) => {
-      state.error = null;
-    },
-    clearNewCredentials: (state) => {
-      state.newCredentials = null;
-    },
-
-    socketCameraConnected: (state, { payload }) => {
-      const id = payload.cameraConnectionId?.toString();
-      const exists = state.cameras.find((c) => c._id === id);
-      if (exists) {
-        state.cameras = state.cameras.map((c) =>
-          c._id === id
-            ? {
-                ...c,
-                isOnline: true,
-                connectedAt: payload.connectedAt,
-                cameraIP: payload.cameraIP,
-              }
-            : c,
-        );
-      } else {
-        state.cameras = [{ _id: id, ...payload }, ...state.cameras];
-      }
-    },
-
-    socketCameraDisconnected: (state, { payload }) => {
-      const id = payload.cameraConnectionId?.toString();
-      state.cameras = state.cameras.map((c) =>
-        c._id === id
-          ? { ...c, isOnline: false, disconnectedAt: payload.disconnectedAt }
-          : c,
-      );
-    },
-
-    socketCameraUpdated: (state, { payload }) => {
-      const id = payload.cameraConnectionId?.toString();
-      state.cameras = state.cameras.map((c) =>
-        c._id === id ? { ...c, ...payload } : c,
-      );
-    },
-  },
-
-  extraReducers: (builder) => {
-    builder
-      // ─── Fetch All ─────────────────────────────────────
-      .addCase(fetchCameras.pending, (state) => {
-        state.loading = true;
-        state.error = null;
-      })
-      .addCase(fetchCameras.fulfilled, (state, action) => {
-        state.cameras = action.payload || [];
-        state.loading = false;
-      })
-      .addCase(fetchCameras.rejected, (state, action) => {
-        state.error = action.payload;
-        state.loading = false;
-      })
-
-      // ─── Create Token ───────────────────────────────────
-      .addCase(createCameraToken.pending, (state) => {
-        state.actionLoading = true;
-        state.error = null;
-      })
-      .addCase(createCameraToken.fulfilled, (state, action) => {
-        state.newCredentials = action.payload;
-
-        // Backend now returns connectionId — use it as _id
-        if (action.payload?.connectionId) {
-          const newCamera = {
-            _id: action.payload.connectionId,
-            cameraTokenId: action.payload.cameraTokenId,
-            tokenName: action.payload.tokenName,
-            isOnline: false,
-            isUploadEnabled: true,
-            totalUploaded: 0,
-            assignedEventId: null,
-            assignedAlbumId: null,
-            cameraIP: null,
-          };
-          state.cameras = [newCamera, ...state.cameras];
-        }
-        state.actionLoading = false;
-      })
-      .addCase(createCameraToken.rejected, (state, action) => {
-        state.error = action.payload;
-        state.actionLoading = false;
-      })
-
-      // ─── Assign Event/Album ─────────────────────────────
-      .addCase(assignCameraEventAlbum.pending, (state) => {
-        state.actionLoading = true;
-        state.error = null;
-      })
-      .addCase(assignCameraEventAlbum.fulfilled, (state, action) => {
-        state.cameras = state.cameras.map((c) =>
-          c._id === action.payload._id ? { ...c, ...action.payload } : c,
-        );
-        state.actionLoading = false;
-      })
-      .addCase(assignCameraEventAlbum.rejected, (state, action) => {
-        state.error = action.payload;
-        state.actionLoading = false;
-      })
-
-      // ─── Toggle Upload ──────────────────────────────────
-      .addCase(toggleCameraUpload.pending, (state) => {
-        state.actionLoading = true;
-      })
-      .addCase(toggleCameraUpload.fulfilled, (state, action) => {
-        state.cameras = state.cameras.map((c) =>
-          c._id === action.payload.cameraConnectionId
-            ? { ...c, isUploadEnabled: action.payload.isUploadEnabled }
-            : c,
-        );
-        state.actionLoading = false;
-      })
-      .addCase(toggleCameraUpload.rejected, (state, action) => {
-        state.error = action.payload;
-        state.actionLoading = false;
-      })
-
-      // ─── Delete Token ───────────────────────────────────
-      .addCase(deleteCameraToken.pending, (state) => {
-        state.actionLoading = true;
-        state.error = null;
-      })
-      .addCase(deleteCameraToken.fulfilled, (state, action) => {
-        // ✅ Remove by tokenId OR _id (whichever matches)
-        state.cameras = state.cameras.filter(
-          (c) =>
-            c.cameraTokenId?.toString() !== action.payload &&
-            c._id?.toString() !== action.payload,
-        );
-        state.actionLoading = false;
-      })
-      .addCase(deleteCameraToken.rejected, (state, action) => {
-        state.error = action.payload;
-        state.actionLoading = false;
-      });
-  },
-});
-
-export const {
-  clearError,
-  clearNewCredentials,
-  socketCameraConnected,
-  socketCameraDisconnected,
-  socketCameraUpdated,
-} = cameraSlice.actions;
-
-export default cameraSlice.reducer;
-
-
-
-// redux/features/camera/camerasThunks.js
-
-import {
-  createItemJson,
-  deleteItem,
-  fetchData,
-  updateItemJson,
-} from "@/src/api/endpoint";
-import { createAsyncThunk } from "@reduxjs/toolkit";
-
-const ENDPOINTS = {
-  FETCH_ALL: "camera/fetchAll",
-  CREATE_TOKEN: "camera/token",
-  ASSIGN: "camera/assign",
-  TOGGLE: "camera/toggle",
-  DELETE_TOKEN: "camera/token",
-};
-
-const ERROR_MESSAGES = {
-  FETCH: "Failed to fetch cameras",
-  CREATE_TOKEN: "Failed to create camera token",
-  ASSIGN: "Failed to assign event/album",
-  TOGGLE: "Failed to toggle camera upload",
-  DELETE: "Failed to delete camera token",
-};
-
-// ✅ Fetch all cameras for client
-export const fetchCameras = createAsyncThunk(
-  "camera/fetchAll",
-  async (params, { rejectWithValue }) => {
-    try {
-      const { data } = await fetchData({
-        endpoint: ENDPOINTS.FETCH_ALL,
-        ...params,
-      });
-      return data;
-    } catch (error) {
-      return rejectWithValue(error.message || ERROR_MESSAGES.FETCH);
-    }
-  },
-);
-
-// ✅ Generate FTP credentials (add new camera)
-export const createCameraToken = createAsyncThunk(
-  "camera/createToken",
-  async ({ formData }, { rejectWithValue }) => {
-    try {
-      const data = await createItemJson({
-        endpoint: ENDPOINTS.CREATE_TOKEN,
-        formData,
-      });
-      if (data) return data;
-    } catch (error) {
-      return rejectWithValue(error.message || ERROR_MESSAGES.CREATE_TOKEN);
-    }
-  },
-);
-
-// ✅ Assign event + album to camera
-export const assignCameraEventAlbum = createAsyncThunk(
-  "camera/assign",
-  async ({ formData }, { rejectWithValue }) => {
-    try {
-      const data = await updateItemJson({
-        endpoint: ENDPOINTS.ASSIGN,
-        formData,
-        id: formData.cameraConnectionId,
-      });
-      if (data) return data;
-    } catch (error) {
-      return rejectWithValue(error.message || ERROR_MESSAGES.ASSIGN);
-    }
-  },
-);
-
-// ✅ Toggle enable/disable upload
-export const toggleCameraUpload = createAsyncThunk(
-  "camera/toggle",
-  async ({ cameraConnectionId }, { rejectWithValue }) => {
-    try {
-      const data = await updateItemJson({
-        endpoint: ENDPOINTS.TOGGLE,
-        formData: {},
-        id: cameraConnectionId,
-      });
-      if (data) return data;
-    } catch (error) {
-      return rejectWithValue(error.message || ERROR_MESSAGES.TOGGLE);
-    }
-  },
-);
-
-// ✅ Delete camera token
-export const deleteCameraToken = createAsyncThunk(
-  "camera/deleteToken",
-  async ({ id, setShowDeleteModal }, { rejectWithValue }) => {
-    try {
-      const data = await deleteItem({
-        endpoint: ENDPOINTS.DELETE_TOKEN,
-        id,
-      });
-      if (data) {
-        setShowDeleteModal(false);
-        return id;
-      }
-    } catch (error) {
-      return rejectWithValue(error.message || ERROR_MESSAGES.DELETE);
-    }
-  },
-);
+export default Header;

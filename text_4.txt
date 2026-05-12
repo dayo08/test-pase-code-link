@@ -1,0 +1,222 @@
+import React from "react";
+import {
+  FiX,
+  FiPlus,
+  FiUpload,
+  FiHardDrive,
+  FiTrash2,
+  FiImage,
+} from "react-icons/fi";
+import Modal from "../Common/Modal";
+
+const UploadModal = ({
+  isOpen,
+  onClose,
+  selectedFiles,
+  removeSelectedFile,
+  handleFileChange,
+  handleUpload,
+  originalImg,
+  selectedMB,
+  selectedCount,
+  totalLimit = 0,
+  totalUsed = 0,
+  isPhotoBased,
+}) => {
+  const addedValue = isPhotoBased ? selectedCount : selectedMB;
+
+  const isOverLimit = isPhotoBased
+    ? totalUsed + selectedFiles.length > totalLimit
+    : totalUsed + selectedMB > totalLimit;
+
+  const usagePercent =
+    totalLimit > 0 ? Math.min((totalUsed / totalLimit) * 100, 100) : 0;
+
+  const afterUploadPercent =
+    totalLimit > 0
+      ? Math.min(((totalUsed + addedValue) / totalLimit) * 100, 100)
+      : 0;
+
+  return (
+    <Modal
+      onClose={onClose}
+      className="bg-white rounded-2xl shadow-2xl p-0 max-w-6xl w-full h-screen mx-1 md:mx-4 overflow-hidden"
+      positionClass="items-center justify-center"
+      isOpen={isOpen}
+      closeOnOutsideClick={false}
+    >
+      <div className="flex flex-col h-full">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-primary to-primary/90 px-4 py-2 text-white">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg md:text-xl lg:text-2xl font-bold mb-1">
+                Upload Your Photos
+              </h3>
+              <p className="text-white/80 text-xs sm:text-sm">
+                {selectedFiles.length} photo{" "}
+                {selectedFiles.length !== 1 ? "s" : ""} selected
+              </p>
+            </div>
+            <div className="text-right">
+              <div className="bg-white/10 backdrop-blur-sm rounded-lg sm:rounded-xl px-3 py-1 sm:px-4 sm:py-2">
+                <div className="text-xl lg:text-2xl font-bold text-secondary">
+                  {selectedFiles.length}
+                </div>
+                <div className="text-[10px] sm:text-xs text-white/80">
+                  Files
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          {/* ✅ Storage / Photo usage section */}
+          <div className="px-4 py-2 bg-gradient-to-r from-gray-50 to-white border-b">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2 sm:gap-3">
+                <div className="p-1 sm:p-2 bg-primary/10 rounded-md sm:rounded-lg">
+                  <FiHardDrive className="text-primary" size={16} />
+                </div>
+                <div>
+                  <h4 className="text-sm lg:text-base font-semibold text-gray-900">
+                    {/* ✅ Dynamic title */}
+                    {isPhotoBased ? "Photo Limit Usage" : "Storage Usage"}
+                  </h4>
+                  <p className="text-xs sm:text-sm text-gray-600">
+                    {/* ✅ Dynamic used/limit text */}
+                    {isPhotoBased
+                      ? `${totalUsed} of ${totalLimit} photos used`
+                      : `${totalUsed.toFixed(2)} MB of ${totalLimit} MB used`}
+                  </p>
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-base lg:text-lg font-bold text-secondary">
+                  {/* ✅ Dynamic "adding" indicator */}
+                  {isPhotoBased
+                    ? `+${selectedFiles.length} photos`
+                    : `+${selectedMB.toFixed(2)} MB`}
+                </div>
+                <div className="text-[10px] sm:text-xs text-gray-500">
+                  {originalImg ? "Original" : "Compress"} Size
+                </div>
+              </div>
+            </div>
+
+            {/* Progress bar: current usage */}
+            <div className="overflow-hidden h-2 mb-1 text-xs flex rounded-full bg-gray-200">
+              <div
+                style={{ width: `${usagePercent}%` }}
+                className="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-gradient-to-r from-primary to-secondary"
+              />
+            </div>
+
+            {/* Progress bar: after upload preview */}
+            {!isOverLimit && (
+              <div className="overflow-hidden h-2 text-xs flex rounded-full -mt-3">
+                <div
+                  style={{ width: `${afterUploadPercent}%` }}
+                  className="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-gradient-to-r from-secondary/60 to-secondary/40"
+                />
+              </div>
+            )}
+
+            {/* ✅ Over limit warning — dynamic message */}
+            {isOverLimit && (
+              <p className="text-red-600 text-xs font-medium mt-1">
+                {isPhotoBased
+                  ? "Photo limit exceeded! Remove files to continue"
+                  : "Storage limit exceeded! Remove files to continue"}
+              </p>
+            )}
+          </div>
+
+          {/* File List */}
+          <div className="p-1.5 md:p-3">
+            <div className="border border-gray-200 rounded-lg overflow-hidden bg-gray-50/50">
+              {selectedFiles.length > 0 ? (
+                <div className="p-1.5 grid grid-cols-2 sm:grid-cols-4 gap-2 overflow-auto">
+                  {selectedFiles.map((file, idx) => (
+                    <div
+                      key={idx}
+                      className="p-1.5 bg-white rounded-lg border transition-all border-gray-200 hover:bg-gray-50"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="min-w-0">
+                          <h4 className="text-xs font-normal text-gray-900 line-clamp-1">
+                            {file.originalName}
+                          </h4>
+                          <div className="flex items-center mt-1 text-xs text-gray-500">
+                            <span className="bg-gray-100 px-2 py-1 rounded-lg font-medium">
+                              {file.size} MB
+                            </span>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => removeSelectedFile(file)}
+                          className="text-gray-400 hover:text-red-500 p-1"
+                          title="Remove file"
+                        >
+                          <FiTrash2 size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="h-full flex items-center justify-center text-gray-500 p-8">
+                  <div className="text-center">
+                    <FiImage size={32} className="mx-auto mb-2 text-gray-300" />
+                    <p className="text-sm">No files selected</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Action buttons */}
+        <div className="px-4 py-3 bg-gray-50 border-t">
+          <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 md:gap-4 justify-between">
+            <button
+              className="px-4 py-2 sm:px-6 sm:py-3 bg-white text-gray-700 border border-gray-300 rounded-lg sm:rounded-xl font-medium hover:bg-gray-50 hover:border-gray-400 transition-all duration-200 flex items-center justify-center gap-2 text-sm sm:text-base"
+              onClick={onClose}
+            >
+              <FiX size={14} />
+              Cancel
+            </button>
+            <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+              <label className="px-4 py-2 sm:px-6 sm:py-3 bg-gradient-to-r from-primary to-primary/90 text-white rounded-lg sm:rounded-xl cursor-pointer hover:from-primary/90 hover:to-primary transition-all duration-200 flex items-center justify-center gap-2 font-medium text-sm sm:text-base shadow-md hover:shadow-lg">
+                <FiPlus size={14} />
+                Add More
+                <input
+                  type="file"
+                  multiple
+                  onChange={(e) => handleFileChange(e, true)}
+                  className="hidden"
+                  accept="image/*"
+                />
+              </label>
+              <button
+                onClick={handleUpload}
+                disabled={isOverLimit}
+                className={`px-4 py-2 sm:px-6 sm:py-3 bg-gradient-to-r from-secondary to-secondary/90 text-primary rounded-lg sm:rounded-xl font-bold hover:from-secondary/90 hover:to-secondary transition-all duration-200 flex items-center justify-center gap-2 text-sm sm:text-base shadow-md hover:shadow-lg ${
+                  isOverLimit || selectedFiles.length === 0
+                    ? "opacity-50 cursor-not-allowed"
+                    : "hover:scale-[1.02]"
+                }`}
+              >
+                <FiUpload size={14} />
+                Upload
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
+export default UploadModal;

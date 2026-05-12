@@ -1,0 +1,24 @@
+import React from "react";
+import { FiFolder, FiChevronLeft } from "react-icons/fi";
+
+const EmptyState = ({ sidebarVisible, setSidebarVisible }) => (
+  <div className="flex items-center justify-center h-full text-gray-500 p-4">
+    <div className="text-center bg-white p-6 sm:p-8 rounded-xl shadow-sm max-w-sm w-full">
+      <div className="bg-[#f3f6fa] w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+        <FiFolder size={32} className="text-secondary" />
+      </div>
+      <h2 className="text-lg sm:text-xl font-semibold text-primary mb-2">No Album Selected</h2>
+      <p className="text-sm text-gray-600 mb-6">Select an album from the sidebar or create a new one to get started</p>
+      {!sidebarVisible && (
+        <button
+          onClick={() => setSidebarVisible(true)}
+          className="w-full px-4 py-2.5 bg-gradient-to-r from-secondary to-[#f4c16b] text-primary rounded-lg font-medium flex items-center justify-center gap-2 hover:from-[#d99c38] hover:to-[#e8b359] transition-all duration-200 shadow-sm hover:shadow"
+        >
+          <FiChevronLeft className="text-lg" /> Show Albums
+        </button>
+      )}
+    </div>
+  </div>
+);
+
+export default EmptyState; 
