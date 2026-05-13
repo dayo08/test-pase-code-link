@@ -1,23 +1,24 @@
 "use client";
-import { compareProductUrl, searchProducts } from "@/src/api/pythonApiService";
+import { compareProductUrl } from "@/src/api/pythonApiService";
+import {
+  ComparisonCard,
+  SavingsBanner,
+  SourceProductCard,
+} from "@/src/components/compare/CompareComponents";
 import {
   AILoader,
-  BL,
-  EmptyState,
   InlineSearch,
-  PlatformSection,
-  ResultsBar,
 } from "@/src/components/search/SearchComponents";
 import { useRootData } from "@/src/context/rootContext";
-import { AnimatePresence } from "framer-motion";
-import { ArrowLeft } from "lucide-react";
+import { saveComparisonHistory } from "@/src/services/profileService";
+import { AnimatePresence, motion } from "framer-motion";
+import { AlertCircle, ArrowLeft, LayoutGrid, Search, Zap } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-export default function SearchPage() {
+export default function ComparePage() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const query = searchParams.get("q");
   const urlParam = searchParams.get("url");
 
   const { isAuthenticated, isLoadingUser, setLoginModalOpen, triggerSearch } =
@@ -25,8 +26,8 @@ export default function SearchPage() {
 
   const [loading, setLoading] = useState(true);
   const [results, setResults] = useState(null);
+  const [error, setError] = useState(null);
   const [elapsed, setElapsed] = useState(0);
-  const [activePlatform, setActivePlatform] = useState("All");
 
   const startRef = useRef(Date.now());
   const timerRef = useRef(null);
@@ -41,150 +42,134 @@ export default function SearchPage() {
 
   const stopTimer = () => {
     clearInterval(timerRef.current);
-    setElapsed(Math.floor((Date.now() - startRef.current) / 1000));
   };
-  const performSearch = useCallback(
-    async (q = query, u = urlParam) => {
-      if (abortControllerRef.current) abortControllerRef.current.abort();
+
+  const fetchComparison = useCallback(
+    async (url) => {
+      // Abort any previous pending request
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+
+      // Create new abort controller for this request
       const controller = new AbortController();
       abortControllerRef.current = controller;
 
       setLoading(true);
-      setResults(null);
+      setError(null);
       setElapsed(0);
       startTimer();
+
       try {
-        let data;
-        if (u) data = await compareProductUrl(u, { signal: controller.signal });
-        else if (q)
-          data = await searchProducts(q, { signal: controller.signal });
+        const data = await compareProductUrl(url, {
+          signal: controller.signal,
+        });
         setResults(data);
-      } catch (err) {
-        if (
-          ["CanceledError", "AbortError"].includes(err.name) ||
-          err.message === "canceled"
-        ) {
-          console.log("Search request aborted");
-          return;
+
+        // Save URL-wise comparison history
+        if (isAuthenticated && data?.source) {
+          saveComparisonHistory(url, data.source.title, data).catch(() => {});
         }
-        console.error("Search failed:", err);
-        setResults(null);
+      } catch (err) {
+        if (err.name === "CanceledError" || err.name === "AbortError") {
+          console.log("Request aborted:", url);
+          return; // Don't update state if aborted
+        }
+        console.error("Comparison failed:", err);
+        setError("Failed to fetch comparison. Please try again.");
       } finally {
+        // Only cleanup if this is still the active controller
         if (abortControllerRef.current === controller) {
           stopTimer();
           setLoading(false);
-          abortControllerRef.current = null;
         }
       }
     },
-    [query, urlParam],
+    [isAuthenticated],
   );
-
-
-  // ── Authentication Check Logic ──
-  // useEffect(() => {
-  //   // 1. Wait for user profile to finish loading
-  //   if (isLoadingUser) return;
-
-  //   // 2. Handle empty queries
-  //   if (!query && !urlParam) {
-  //     setLoading(false);
-  //     return;
-  //   }
-
-  //   // 3. Only trigger login modal if strictly NOT authenticated
-  //   if (!isAuthenticated) {
-  //     setLoading(false);
-  //     setLoginModalOpen(true);
-  //     return;
-  //   }
-
-  //   // 4. Start search if authenticated
-  //   performSearch();
-  // }, [
-  //   performSearch,
-  //   isAuthenticated,
-  //   isLoadingUser,
-  //   query,
-  //   urlParam,
-  //   setLoginModalOpen,
-  // ]);
-
-  // ── Navigation Protection & Unmount Cleanup ──
-  useEffect(() => {
-    if (!loading) return;
-
-    const handleBeforeUnload = (e) => {
-      e.preventDefault();
-      e.returnValue = "";
-    };
-
-    const handleClick = (e) => {
-      const anchor = e.target.closest("a");
-      if (anchor && anchor.href && !anchor.target) {
-        try {
-          const url = new URL(anchor.href, window.location.href);
-          if (
-            url.pathname !== window.location.pathname ||
-            url.search !== window.location.search
-          ) {
-            if (
-              !window.confirm(
-                "A search is currently in progress. Are you sure you want to leave this page?",
-              )
-            ) {
-              e.preventDefault();
-              e.stopPropagation();
-            }
-          }
-        } catch (err) {}
-      }
-    };
-
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    document.addEventListener("click", handleClick, { capture: true });
-
-    return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload);
-      document.removeEventListener("click", handleClick, { capture: true });
-    };
-  }, [loading]);
 
   useEffect(() => {
     return () => {
       clearInterval(timerRef.current);
-      if (abortControllerRef.current) abortControllerRef.current.abort();
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
     };
   }, []);
 
-  const handleInlineSearch = (newQ) => triggerSearch(newQ);
+  useEffect(() => {
+    if (isLoadingUser) return;
 
-  const allProducts = useMemo(() => {
-    if (!results?.platforms) return [];
-    return Object.values(results.platforms).flat();
-  }, [results]);
+    if (!urlParam) {
+      router.push("/");
+      return;
+    }
 
-  const platformList = useMemo(() => {
-    if (!results?.platforms) return ["All"];
-    return [
-      "All",
-      ...Object.keys(results.platforms).filter(
-        (p) => results.platforms[p]?.length > 0,
-      ),
+    if (!isAuthenticated) {
+      setLoginModalOpen(true);
+      return;
+    }
+
+    fetchComparison(urlParam);
+  }, [
+    urlParam,
+    isAuthenticated,
+    isLoadingUser,
+    fetchComparison,
+    router,
+    setLoginModalOpen,
+  ]);
+
+  const bestPrice = useMemo(() => {
+    if (!results?.source) return null;
+
+    const allOptions = [
+      {
+        price: results.source.price,
+        platform: results.source.platform,
+        isSource: true,
+        url: results.source.url,
+      },
+      ...(results.comparisons || [])
+        .filter((c) => c.match)
+        .map((c) => ({
+          price: c.match.price,
+          platform: c.platform,
+          isSource: false,
+          url: c.match.url,
+        })),
     ];
+
+    if (allOptions.length === 0) return null;
+
+    // Find the option with the absolute minimum price
+    return allOptions.reduce(
+      (min, p) => (p.price < min.price ? p : min),
+      allOptions[0],
+    );
   }, [results]);
 
-  const filteredProducts = useMemo(() => {
-    if (activePlatform === "All") return allProducts;
-    return results?.platforms[activePlatform] || [];
-  }, [activePlatform, allProducts, results]);
+  if (isLoadingUser) {
+    return (
+      <div className="min-h-screen bg-[#f4f8ff] flex flex-col items-center justify-center">
+        <AILoader query="User Profile" elapsed={0} />
+      </div>
+    );
+  }
+
+  // ── Derive best price + savings (add this in your page component) ──────────────
+  const matched = results?.comparisons?.filter((c) => c.match) ?? [];
+  const prices = matched.map((c) => c.match.price);
+  const lowestPrice = prices.length ? Math.min(...prices) : null;
+  const bestItem = matched.find((c) => c.match.price === lowestPrice);
+  const totalSaving =
+    lowestPrice && results?.source?.price && lowestPrice < results.source.price
+      ? results.source.price - lowestPrice
+      : 0;
 
   return (
-    <div className="min-h-screen bg-[#f8f9fb] pb-20">
-      <AnimatePresence>
-        {loading && <AILoader query={query || urlParam} elapsed={elapsed} />}
-      </AnimatePresence>
-
+    <div className="min-h-screen bg-[#f4f8ff] pb-20">
+      {/* Premium Header */}
       <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-md border-b border-gray-100 px-4 py-3">
         <div className="max-w-7xl mx-auto flex flex-col gap-1">
           <div className="flex items-center gap-3">
@@ -196,66 +181,129 @@ export default function SearchPage() {
             </button>
             <div className="flex-1 flex flex-col min-w-0">
               <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">
-                AI Search Active
+                AI Comparison
               </span>
               <h1 className="text-sm font-black text-gray-900 truncate">
-                {query || "Comparing URL..."}
+                {"Comparing URL..."}
               </h1>
             </div>
           </div>
-          <InlineSearch currentQuery={query} onSearch={handleInlineSearch} />
+          <InlineSearch
+            currentQuery={urlParam}
+            onSearch={(q) => triggerSearch(q)}
+          />
         </div>
       </header>
 
-      {!loading && results && (
-        <main className="max-w-7xl mx-auto">
-          <ResultsBar count={allProducts.length} elapsed={elapsed} />
-
-          <div className="flex items-center gap-2 overflow-x-auto px-4 py-4 no-scrollbar">
-            {platformList.map((p) => (
+      <main className="max-w-4xl mx-auto px-4 py-5 sm:py-8">
+        <AnimatePresence mode="wait">
+          {/* ── Loading ── */}
+          {loading ? (
+            <AILoader query={urlParam} elapsed={elapsed} />
+          ) : error ? (
+            /* ── Error ── */
+            <motion.div
+              key="error"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="flex flex-col items-center justify-center text-center py-16 gap-4"
+            >
+              <div className="w-12 h-12 bg-red-50 rounded-2xl flex items-center justify-center">
+                <AlertCircle className="w-6 h-6 text-red-500" />
+              </div>
+              <div>
+                <h2 className="text-sm font-black text-gray-900 mb-1">
+                  Comparison Failed
+                </h2>
+                <p className="text-[11px] text-gray-400 max-w-[240px] mx-auto leading-relaxed">
+                  {error}
+                </p>
+              </div>
               <button
-                key={p}
-                onClick={() => setActivePlatform(p)}
-                className="px-4 py-2 rounded-2xl text-xs font-black whitespace-nowrap transition-all border"
-                style={{
-                  background: activePlatform === p ? BL : "white",
-                  color: activePlatform === p ? "white" : "#64748b",
-                  borderColor: activePlatform === p ? BL : "#e2e8f0",
-                  boxShadow:
-                    activePlatform === p ? `0 4px 12px ${BL}30` : "none",
-                }}
+                onClick={() => fetchComparison(urlParam)}
+                className="px-6 py-2.5 rounded-xl font-black text-xs text-white active:scale-95 transition-all shadow-lg shadow-blue-500/20"
+                style={{ background: P_DARK }}
               >
-                {p}
+                Try Again
               </button>
-            ))}
-          </div>
+            </motion.div>
+          ) : results?.source ? (
+            /* ── Results ── */
+            <motion.div
+              key="results"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="flex flex-col lg:grid lg:grid-cols-12 gap-4 lg:gap-8 items-start"
+            >
+              {/* ── Source product ── */}
+              <div className="lg:col-span-5">
+                <SourceProductCard product={results.source} />
+              </div>
 
-          <div className="px-4">
-            {activePlatform === "All" ? (
-              Object.keys(results.platforms || {}).map((p) => (
-                <PlatformSection
-                  key={p}
-                  platform={p}
-                  products={results.platforms[p]}
-                />
-              ))
-            ) : (
-              <PlatformSection
-                platform={activePlatform}
-                products={filteredProducts}
-              />
-            )}
-          </div>
-        </main>
-      )}
+              {/* ── Right column ── */}
+              <div className="lg:col-span-7 flex flex-col gap-3">
+                {/* SavingsBanner — only if source is pricier than a comparison */}
+                {totalSaving > 0 && (
+                  <SavingsBanner saving={totalSaving} count={matched.length} />
+                )}
 
-      {!loading && results && allProducts.length === 0 && (
-        <EmptyState
-          query={query}
-          onBack={() => router.push("/")}
-          elapsed={elapsed}
-        />
-      )}
+                {/* Section header */}
+                <div className="flex items-center justify-between px-1">
+                  <h3 className="text-[10px] font-black uppercase tracking-widest text-[#0167ff] flex items-center gap-1.5">
+                    <LayoutGrid className="w-3.5 h-3.5 text-[#34c759]" />
+                    Live Price Matches
+                  </h3>
+                  <span className="text-[9px] font-bold text-gray-400">
+                    {matched.length} Verified Deal
+                    {matched.length !== 1 ? "s" : ""}
+                  </span>
+                </div>
+
+                {/* Comparison cards */}
+                <div className="flex flex-col gap-2.5">
+                  {matched.length > 0 ? (
+                    matched.map((item, idx) => (
+                      <ComparisonCard
+                        key={idx}
+                        item={item}
+                        isBestPrice={
+                          item.platform === bestItem?.platform &&
+                          item.match.url === bestItem?.match?.url
+                        }
+                        sourcePrice={results.source.price}
+                        totalSaving={totalSaving}
+                      />
+                    ))
+                  ) : (
+                    /* ── No matches ── */
+                    <div className="py-10 text-center rounded-2xl bg-gray-50 border border-dashed border-gray-200">
+                      <Search className="w-6 h-6 text-gray-300 mx-auto mb-2" />
+                      <p className="text-[11px] font-bold text-gray-400">
+                        No price matches found on other platforms.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          ) : (
+            /* ── Fallback: no data ── */
+            <div className="flex flex-col items-center justify-center text-center py-20 gap-4">
+              <div className="w-12 h-12 bg-gray-50 rounded-2xl flex items-center justify-center">
+                <Search className="w-6 h-6 text-gray-300" />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-gray-900">
+                  No Data Found
+                </h3>
+                <p className="text-[11px] text-gray-400 mt-1">
+                  We couldn&apos;t find any information for this URL.
+                </p>
+              </div>
+            </div>
+          )}
+        </AnimatePresence>
+      </main>
     </div>
   );
 }
