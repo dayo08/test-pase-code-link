@@ -1,585 +1,235 @@
 "use client";
-import { useAlbum } from "@/src/context/albumContext";
-import { useRootData } from "@/src/context/rootContext";
-import { validateAlbumImages } from "@/src/redux/features/album/albumThunks";
-import { STORAGE_TYPE } from "@/src/utils";
-import { simpleUploader } from "@/src/utils/uploadHelpers";
-import sha256 from "crypto-js/sha256";
+
 import dynamic from "next/dynamic";
-import { useEffect, useState } from "react";
-import { useSelector } from "react-redux";
+import Link from "next/link";
+import { useState, useEffect } from "react";
+import { motion } from "framer-motion";
+import { Flame, Tag, ArrowRight, ShoppingBag } from "lucide-react";
 
-const UploadManager = dynamic(() => import("./UploadManager"), {
-  loading: () => null,
-  ssr: false,
-});
-const Header = dynamic(() => import("./Header"));
-const Sidebar = dynamic(() => import("./Sidebar"));
-const DeleteAlbum = dynamic(() => import("./DeleteAlbum"));
-const UploadModal = dynamic(() => import("./UploadModal"));
-const DuplicateFilesModal = dynamic(() => import("./DuplicateFilesModal"));
-const RejectionModal = dynamic(() => import("./RejectionModal"));
-const ImageGallery = dynamic(() => import("./ImageGallery"));
-const UploadSection = dynamic(() => import("./UploadSection"));
-const EmptyState = dynamic(() => import("./EmptyState"));
+// ── Context / Services
+import { useRootData } from "@/src/context/rootContext";
+import { getSlider } from "@/src/services/homePageService";
 
-export default function EventAlbumPage() {
-  const { onePackage, user, storageType, isINR } = useRootData();
+// ── Hooks
+
+import { useDealsList, todayDealsFilters } from "@/src/hooks/useDealsList";
+
+// ── Section Components (static imports)
+import StatsSection from "@/src/components/Home/StatsSection";
+import DealsSection from "@/src/components/Home/DealsSection";
+import PromoSlider from "@/src/components/Home/PromoSlider";
+import PlatformSection from "@/src/components/Home/PlatformSection";
+import SectionHeader from "@/src/components/Common/SectionHeader";
+import CommentModal from "@/src/components/deals/CommentModal";
+import { fetchBulkCardComments } from "@/src/services/commentService";
+
+// ── Lazy / no SSR — components that touch window, WebGL, or browser-only APIs
+import HeroSection from "../components/Home/HeroSection";
+
+const TelegramPopup = dynamic(
+  () => import("../components/Home/TelegramPopup"),
+  { ssr: false },
+);
+
+// ── Constants
+const BL = "#0167ff";
+const GR = "#34c759";
+
+/* ─────────────────────────────────────────────
+   HOME PAGE
+───────────────────────────────────────────── */
+export default function HomePage() {
+  const [query, setQuery] = useState("");
+  const [slides, setSlides] = useState([]);
+  const { triggerSearch } = useRootData();
+
+  // ── Reaction/Comment Data states
+  const [commentPreviews, setCommentPreviews] = useState({});
+  const [commentCounts, setCommentCounts] = useState({});
+  const [reactionData, setReactionData] = useState({
+    totals: {},
+    userLiked: {},
+  });
+  const [commentModalDeal, setCommentModalDeal] = useState(null);
+
+  // ── Today's Deals (API)
   const {
-    loadAlbums,
-    loadAlbum,
-    removeAlbum,
-    saveAlbum,
-    uploadImages,
-    replaceImages,
-    eventId,
-  } = useAlbum();
-  const { albums, loading, currentAlbum } = useSelector((state) => state.album);
-  const { oneEvent } = useSelector((state) => state.event);
-
-  const originalImg = onePackage?.packageId?.downloadOriginalImg;
-  const isPhotoBased = storageType === STORAGE_TYPE.PHOTO_COUNT;
-
-  const totalLimit = isPhotoBased
-    ? onePackage?.packageId?.storePhotos || 0
-    : onePackage?.packageId?.totalPhotoMB || 0;
-
-  const totalUsed = isPhotoBased
-    ? onePackage?.eventStatistics?.totalPhotos || 0
-    : onePackage?.eventStatistics?.totalMBUsed || 0;
-
-  const [state, setState] = useState({
-    albumName: "",
-    editAlbumId: null,
-    showDeleteModal: false,
-    albumToDelete: null,
-    selectedAlbumId: null,
-    selectedFiles: [],
-    sidebarVisible: true,
-    showUploadModal: false,
-    showRejectionModal: false,
-    selectedMB: 0,
-    selectedCount: 0,
+    deals: todayDeals,
+    loading: todayLoading,
+    reload: reloadTodayDeals,
+  } = useDealsList({
+    initialFilters: todayDealsFilters,
+    autoLoad: false,
+    limit: 8,
   });
 
-  const [uploadTracker, setUploadTracker] = useState({
-    files: [],
-    isUploading: false,
-    totalFiles: 0,
-    totalProgress: 0,
-    results: { successCount: 0, failedCount: 0 },
-    showResults: false,
-    networkSpeed: "0.0",
-    speedQuality: "Detecting...",
-    speedColor: "gray",
-    estimatedTimeRemaining: 0,
-  });
-
-
-  const [pagination, setPagination] = useState({
-    page: 1,
-    limit: 100,
-    totalItems: 0,
-    totalPages: 1,
-  });
-  const [duplicatesModal, setDuplicatesModal] = useState({
-    open: false,
-    files: [],
-    action: null,
-  });
-  const [fileRejections, setFileRejections] = useState({
-    sizeExceeded: 0,
-    albumLimitExceeded: 0,
-    storageExceeded: 0,
-  });
-
+  // ── Fetch both on mount
   useEffect(() => {
-    simpleUploader.loadOrphanedFiles();
+    reloadTodayDeals();
+    getSlider()
+      .then((d) => {
+        if (d?.length) setSlides(d);
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Page refresh warning
+  // ── Fetch reactions in bulk
   useEffect(() => {
-    const handleBeforeUnload = (e) => {
-      if (uploadTracker.isUploading) {
-        e.preventDefault();
-        e.returnValue = "Uploads in progress. Leave anyway?";
-
-        // Cleanup on unload
-        simpleUploader.cancel();
-        return e.returnValue;
-      }
-    };
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [uploadTracker.isUploading]);
-
-  useEffect(() => {
-    setState((prev) => ({
-      ...prev,
-      selectedAlbumId: albums[0]?._id,
-    }));
-  }, [albums]);
-
-  useEffect(() => {
-    loadAlbums();
-  }, [loadAlbums]);
-
-  useEffect(() => {
-    if (state.selectedAlbumId) {
-      loadAlbum(state.selectedAlbumId, pagination.page, pagination.limit);
-    }
-  }, [loadAlbum, state.selectedAlbumId, pagination.page, pagination.limit]);
-
-  useEffect(() => {
-    if (currentAlbum) {
-      setPagination((prev) => ({
-        ...prev,
-        totalItems: currentAlbum.totalImages,
-        totalPages: currentAlbum.totalPages,
-      }));
-    }
-  }, [currentAlbum]);
-
-  // File selection handler
-  const handleFileChange = (e, isAppend = false) => {
-    const files = Array.from(e.target.files);
-    if (!files.length) {
-      if (!isAppend) alert("No files selected");
-      return;
-    }
-    if (files.length > 1000) {
-      alert("Max 1000 images at once");
-      return;
-    }
-
-    const {
-      imageLimitPerAlbum = 0,
-      maximumPhotoSize = 0,
-      totalPhotoMB = 0,
-      storePhotos = 0,
-    } = onePackage?.packageId || {};
-
-    // Calculate remaining slots considering existing selected files
-    const existingFilesCount = isAppend ? state.selectedFiles.length : 0;
-    const remainingSlots = Math.max(
-      0,
-      imageLimitPerAlbum -
-        (currentAlbum?.totalImages || 0) -
-        existingFilesCount,
+    if (!todayDeals.length) return;
+    const dealIds = todayDeals.map((d) => d.id);
+    const unloaded = dealIds.filter(
+      (id) => reactionData.totals[id] === undefined,
     );
+    if (!unloaded.length) return;
 
-    const remainingStorage = isPhotoBased
-      ? Math.max(0, storePhotos - totalUsed - existingFilesCount) // count-based
-      : Math.max(0, totalPhotoMB - totalUsed); // MB-based
-
-    // Get existing file hashes for duplicate checking
-    const existingHashes = new Set(state.selectedFiles.map((f) => f.hash));
-
-    let duplicateCount = 0;
-    const { validFiles, counts } = files.reduce(
-      (acc, file) => {
-        const originalSize = +(file.size / 1048576).toFixed(4);
-        const size = originalImg
-          ? originalSize
-          : +(Math.random() * 0.67).toFixed(2);
-        const hash = sha256(file.name + file.size).toString();
-
-        // Check if file already exists
-        if (existingHashes.has(hash)) {
-          duplicateCount++;
-          return acc;
+    import("@/src/services/reactionService")
+      .then(({ getBulkReactions }) => getBulkReactions(unloaded))
+      .then((data) => {
+        if (data) {
+          setReactionData((prev) => ({
+            totals: { ...prev.totals, ...(data.totals || {}) },
+            userLiked: { ...prev.userLiked, ...(data.userLiked || {}) },
+          }));
         }
+      })
+      .catch(console.error);
+  }, [todayDeals]);
 
-        if (originalSize > maximumPhotoSize) {
-          acc.counts.size++;
-        } else if (acc.validFiles.length >= remainingSlots) {
-          acc.counts.album++;
-        } else if (
-          isPhotoBased
-            ? // ✅ PHOTO_COUNT: count valid files vs remaining photo count
-              acc.validFiles.length >= remainingStorage
-            : // ✅ MB_BASED: track cumulative MB vs remaining storage
-              acc.counts.totalMB + size > remainingStorage
-        ) {
-          acc.counts.storage++;
-        } else {
-          acc.validFiles.push({
-            file,
-            size,
-            originalSize,
-            originalName: file.name,
-            status: "ready",
-            hash,
-          });
-          acc.counts.totalMB += size;
-        }
-        return acc;
-      },
-      { validFiles: [], counts: { size: 0, album: 0, storage: 0, totalMB: 0 } },
-    );
+  // ── Fetch comment previews in bulk
+  useEffect(() => {
+    if (!todayDeals.length) return;
+    const dealIds = todayDeals.map((d) => d.id);
+    const newIds = dealIds.filter((id) => commentPreviews[id] === undefined);
+    if (!newIds.length) return;
 
-    setFileRejections({
-      sizeExceeded: counts.size,
-      albumLimitExceeded: counts.album,
-      storageExceeded: counts.storage,
-    });
+    fetchBulkCardComments(newIds)
+      .then((data) => {
+        if (data?.previews)
+          setCommentPreviews((prev) => ({ ...prev, ...data.previews }));
+        if (data?.counts)
+          setCommentCounts((prev) => ({ ...prev, ...data.counts }));
+      })
+      .catch(console.error);
+  }, [todayDeals]);
 
-    // Show duplicate warning
-    if (duplicateCount > 0) {
-      alert(
-        `${duplicateCount} file${duplicateCount !== 1 ? "s" : ""} already ${
-          duplicateCount === 1 ? "exists" : "exist"
-        } in your selection. ${
-          duplicateCount === 1 ? "It was" : "They were"
-        } skipped.`,
-      );
-    }
-
-    if (validFiles.length) {
-      setState((prev) => {
-        const mergedFiles = isAppend
-          ? [...prev.selectedFiles, ...validFiles]
-          : validFiles;
-        const mergedMB = isAppend
-          ? prev.selectedMB + counts.totalMB
-          : counts.totalMB;
-        const mergedCount = isAppend
-          ? prev.selectedCount + validFiles.length
-          : validFiles.length;
-
-        return {
-          ...prev,
-          showUploadModal: true,
-          selectedFiles: mergedFiles,
-          selectedMB: mergedMB,
-          selectedCount: mergedCount,
-        };
-      });
-    }
-
-    if (counts.size || counts.album || counts.storage) {
-      setState((prev) => ({ ...prev, showRejectionModal: true }));
-    }
+  const handleSearch = (e) => {
+    e.preventDefault();
+    triggerSearch(query, true);
   };
-
-  // Upload handler
-  const handleUpload = async () => {
-    if (!state.selectedAlbumId || !state.selectedFiles?.length) return;
-
-    try {
-      const { acceptedFiles, duplicateFiles, rejectionCounts } =
-        await validateAlbumImages({
-          albumId: state.selectedAlbumId,
-          eventId: oneEvent?._id,
-          files: state.selectedFiles.map(({ file, ...rest }) => rest),
-        });
-
-      if (
-        rejectionCounts.sizeExceeded ||
-        rejectionCounts.albumLimitExceeded ||
-        rejectionCounts.storageExceeded
-      ) {
-        setFileRejections(rejectionCounts);
-        setState((prev) => ({ ...prev, showRejectionModal: true }));
-        return;
-      }
-
-      if (duplicateFiles?.length > 0) {
-        setDuplicatesModal({ open: true, files: duplicateFiles, action: null });
-        return;
-      }
-
-      const fileMap = new Map(state.selectedFiles.map((f) => [f.hash, f.file]));
-      const trackedFiles = acceptedFiles.map((file) => ({
-        ...file,
-        file: fileMap.get(file.hash),
-        status: "pending",
-        progress: 0,
-      }));
-
-      await uploadFiles(trackedFiles);
-    } catch (err) {
-      console.error("Upload failed:", err);
-    }
+  const handleChip = (q) => {
+    setQuery(q);
+    triggerSearch(q, true);
   };
-
-  const uploadFiles = async (trackedFiles) => {
-    console.time("uploadFiles");
-    setState((prev) => ({
-      ...prev,
-      showUploadModal: false,
-      selectedFiles: [],
-    }));
-
-    setUploadTracker({
-      files: trackedFiles,
-      isUploading: true,
-      totalFiles: trackedFiles.length,
-      totalProgress: 0,
-      results: { successCount: 0, failedCount: 0 },
-      showResults: false,
-    });
-
-    await simpleUploader.uploadFiles(trackedFiles, {
-      setUploadTracker,
-      uploadImages,
-      user,
-      uploadEventId: oneEvent?._id,
-      uploadAlbumId: state.selectedAlbumId,
-      originalImg,
-      isINR,
-      watermarkConfig: onePackage?.watermarkConfig ?? null,
-      completeUpload: (results) => {
-        setUploadTracker((prev) => ({
-          ...prev,
-          isUploading: false,
-          totalProgress: 100,
-          results,
-          showResults: true,
-        }));
-
-        // Auto close after 10s if successful
-        if (results.failedCount === 0 && results.successCount > 0) {
-          setTimeout(() => closeUploadModal(), 10000);
-        }
-      },
-    });
-    console.timeEnd("uploadFiles");
-  };
-
-  const handleDuplicateResolution = async (action) => {
-    const filesToUpload = state.selectedFiles.filter(
-      (file) =>
-        !duplicatesModal.files.some(
-          (df) => df.hash === file.hash && action === "skip",
-        ),
-    );
-
-    if (action === "replace") {
-      const replaceHashes = duplicatesModal.files.map((df) => df.hash);
-      await replaceImages(state.selectedAlbumId, replaceHashes);
-    }
-
-    const fileMap = new Map(filesToUpload.map((f) => [f.hash, f.file]));
-    const trackedFiles = filesToUpload.map((file) => ({
-      ...file,
-      file: fileMap.get(file.hash),
-      status: "pending",
-      progress: 0,
-    }));
-
-    await uploadFiles(trackedFiles);
-    setDuplicatesModal({ open: false, files: [], action: null });
-  };
-
-  const cancelUpload = () => {
-    if (!window.confirm("Cancel upload? All progress will be lost.")) return;
-    simpleUploader.cancel();
-    setTimeout(() => window.location.reload(), 500);
-  };
-
-  const closeUploadModal = () => {
-    setUploadTracker({
-      files: [],
-      isUploading: false,
-      totalFiles: 0,
-      totalProgress: 0,
-      results: { successCount: 0, failedCount: 0 },
-      showResults: false,
-      networkSpeed: "0.0",
-      speedQuality: "Detecting...",
-      speedColor: "gray",
-      estimatedTimeRemaining: 0,
-    });
-  };
-
-
-  const confirmDelete = async () => {
-    await removeAlbum(state.albumToDelete);
-    setState((prev) => ({
-      ...prev,
-      showDeleteModal: false,
-      albumToDelete: null,
-      selectedAlbumId:
-        prev.selectedAlbumId === prev.albumToDelete
-          ? null
-          : prev.selectedAlbumId,
-    }));
-  };
-
-  const handleAlbumSelect = (albumId) => {
-    if (albumId !== state.selectedAlbumId) {
-      setState((prev) => ({ ...prev, selectedAlbumId: albumId }));
-      setPagination((prev) => ({
-        ...prev,
-        page: 1,
-        totalItems: 0,
-        totalPages: 1,
-      }));
-    }
-  };
-
-  const updateState = (updates) =>
-    setState((prev) => ({ ...prev, ...updates }));
-
-  const showUploadManager =
-    uploadTracker.isUploading ||
-    uploadTracker.files.length > 0 ||
-    uploadTracker.showResults;
 
   return (
-    <div className="max-h-full overflow-auto flex flex-col">
-      <Header
-        oneEvent={oneEvent}
-        sidebarVisible={state.sidebarVisible}
-        setSidebarVisible={(val) => updateState({ sidebarVisible: val })}
-        storageType={storageType}
-        packageLimit={totalLimit}
-        isPhotoBased={isPhotoBased}
+    <main className="min-h-screen bg-[#f4f8ff]">
+      <TelegramPopup />
+
+      {/* ══ HERO ══════════════════════════════════════════ */}
+      <HeroSection
+        query={query}
+        setQuery={setQuery}
+        onSearch={handleSearch}
+        onChip={handleChip}
       />
 
-      <div className="flex flex-1 overflow-hidden">
-        <Sidebar
-          albums={albums}
-          loading={loading}
-          setAlbumName={(val) => updateState({ albumName: val })}
-          setSidebarVisible={(val) => updateState({ sidebarVisible: val })}
-          handleAddOrUpdateAlbum={async () => {
-            if (!state.albumName.trim()) return;
-            const payload = state.editAlbumId
-              ? {
-                  albumName: state.albumName,
-                  eventId,
-                  albumId: state.editAlbumId,
-                }
-              : { albumName: state.albumName, eventId };
-            await saveAlbum(payload);
-            updateState({ albumName: "", editAlbumId: null });
+      {/* ══ BELOW-HERO SECTIONS ═══════════════════════════ */}
+      <div className="mx-auto xl:container px-4 sm:px-6 lg:px-8 py-10 sm:py-14 space-y-10">
+        {/* Divider */}
+        <div
+          className="h-px w-full"
+          style={{
+            background: `linear-gradient(to right,transparent,${BL}40,${GR}40,transparent)`,
           }}
-          handleEdit={(album) =>
-            updateState({
-              albumName: album?.albumName || "",
-              editAlbumId: album?._id || null,
-            })
-          }
-          handleDelete={(id) =>
-            updateState({ albumToDelete: id, showDeleteModal: true })
-          }
-          handleSelect={handleAlbumSelect}
-          sidebarVisible={state.sidebarVisible}
-          albumName={state.albumName}
-          editAlbumId={state.editAlbumId}
-          selectedAlbumId={state.selectedAlbumId}
         />
 
-        <main className="flex-1 px-0 py-3 xl:px-3 overflow-y-auto">
-          {state.selectedAlbumId && currentAlbum ? (
-            <>
-              <UploadSection
-                handleFileChange={handleFileChange}
-                maxImageSize={onePackage?.packageId?.maximumPhotoSize}
-                currentAlbum={currentAlbum}
-                storageType={storageType}
-                totalLimit={totalLimit}
-                totalUsed={totalUsed}
-                isPhotoBased={isPhotoBased}
+        {/* Stats */}
+        <StatsSection />
+
+        {/* ── Today's Best Deals (live API) */}
+        <DealsSection
+          deals={todayDeals}
+          loading={todayLoading}
+          title="Best Deals Today"
+          label="Hot right now"
+          icon={Flame}
+          cta="View all deals"
+          href="/best-deals"
+          commentPreviews={commentPreviews}
+          commentCounts={commentCounts}
+          reactionData={reactionData}
+          onViewComments={(d) => setCommentModalDeal(d)}
+        />
+
+        {/* Browse-all CTA */}
+        <div className="flex justify-center -mt-8">
+          <Link href="/best-deals">
+            <motion.div
+              whileHover={{ scale: 1.04 }}
+              whileTap={{ scale: 0.97 }}
+              data-cursor-label="Browse Deals"
+              className="relative inline-flex items-center gap-2 px-7 py-3 rounded-xl font-black text-sm text-white overflow-hidden shadow-xl"
+              style={{ background: `linear-gradient(135deg,${BL},${GR})` }}
+            >
+              <motion.div
+                className="absolute inset-0 bg-gradient-to-r from-transparent via-white/15 to-transparent -skew-x-12"
+                animate={{ x: ["-120%", "200%"] }}
+                transition={{
+                  duration: 3,
+                  repeat: Infinity,
+                  ease: "easeInOut",
+                  repeatDelay: 1.2,
+                }}
               />
-              <ImageGallery
-                uploadedImages={currentAlbum?.images}
-                pagination={pagination}
-                onPageChange={(page) =>
-                  setPagination((prev) => ({ ...prev, page }))
-                }
-                onLimitChange={(limit) =>
-                  setPagination((prev) => ({
-                    ...prev,
-                    limit: Number(limit),
-                    page: 1,
-                  }))
-                }
-                currentAlbumId={currentAlbum._id}
-              />
-            </>
-          ) : (
-            <EmptyState
-              sidebarVisible={state.sidebarVisible}
-              setSidebarVisible={(val) => updateState({ sidebarVisible: val })}
+              <ShoppingBag className="w-4 h-4 relative z-10" />
+              <span className="relative z-10">Browse All Deals</span>
+              <ArrowRight className="w-4 h-4 relative z-10" />
+            </motion.div>
+          </Link>
+        </div>
+
+        {/* Divider */}
+        <div
+          className="h-px w-full"
+          style={{
+            background: `linear-gradient(to right,transparent,${BL}40,${GR}40,transparent)`,
+          }}
+        />
+
+        {/* Promo Slider */}
+        {slides.length > 0 && (
+          <section>
+            <SectionHeader
+              Icon={Tag}
+              label="Exclusive offers"
+              title="Featured Promotions"
             />
-          )}
-        </main>
+            <PromoSlider slides={slides} />
+          </section>
+        )}
+        {/* Platform CTA */}
+        <PlatformSection />
       </div>
 
-      {/* Modals */}
-      {state.showDeleteModal && (
-        <DeleteAlbum
-          state={state.showDeleteModal}
-          updateState={updateState}
-          confirmDelete={confirmDelete}
-          isLoading={loading}
-        />
-      )}
-
-      {state.showUploadModal && (
-        <UploadModal
-          isOpen={state.showUploadModal}
-          onClose={() => updateState({ showUploadModal: false })}
-          selectedFiles={state.selectedFiles}
-          removeSelectedFile={(file) => {
-            const updated = state.selectedFiles.filter((f) => f !== file);
-            updateState({
-              selectedFiles: updated,
-              showUploadModal: !!updated.length,
-              selectedCount: updated.length,
-            });
-          }}
-          handleFileChange={handleFileChange}
-          handleUpload={handleUpload}
-          originalImg={originalImg}
-          selectedMB={state.selectedMB}
-          selectedCount={state.selectedCount}
-          totalLimit={totalLimit}
-          totalUsed={totalUsed}
-          isPhotoBased={isPhotoBased}
-        />
-      )}
-
-      {state.showRejectionModal && (
-        <RejectionModal
-          selectedFilesCount={state.selectedFiles.length}
-          isOpen={state.showRejectionModal}
-          onClose={() =>
-            setState((prev) => ({ ...prev, showRejectionModal: false }))
-          }
-          sizeExceeded={fileRejections.sizeExceeded}
-          albumLimitExceeded={fileRejections.albumLimitExceeded}
-          storageExceeded={fileRejections.storageExceeded}
-          maxSize={onePackage?.packageId?.maximumPhotoSize}
-          albumLimit={onePackage?.packageId?.imageLimitPerAlbum}
-          storageType={storageType}
-          totalStorage={totalLimit}
-          isPhotoBased={isPhotoBased}
-        />
-      )}
-
-      {duplicatesModal.open && (
-        <DuplicateFilesModal
-          originalImg={originalImg}
-          isOpen={duplicatesModal.open}
-          files={duplicatesModal.files}
-          onClose={() => setDuplicatesModal({ open: false, files: [] })}
-          onSkip={() => handleDuplicateResolution("skip")}
-          onReplace={() => handleDuplicateResolution("replace")}
-          onKeepBoth={() => handleDuplicateResolution("copy")}
-        />
-      )}
-
-      {showUploadManager && (
-        <UploadManager
-          uploadTracker={uploadTracker}
-          onCancel={cancelUpload}
-          onClose={closeUploadModal}
-        />
-      )}
-    </div>
+      {/* Comment Modal */}
+      <CommentModal
+        deal={commentModalDeal}
+        onClose={() => setCommentModalDeal(null)}
+        onCommentCreated={(newCm) => {
+          setCommentCounts((prev) => ({
+            ...prev,
+            [commentModalDeal.id]: (prev[commentModalDeal.id] || 0) + 1,
+          }));
+          setCommentPreviews((prev) => ({
+            ...prev,
+            [commentModalDeal.id]: [
+              newCm,
+              ...(prev[commentModalDeal.id] || []),
+            ].slice(0, 2),
+          }));
+        }}
+      />
+    </main>
   );
 }

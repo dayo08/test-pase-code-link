@@ -1,251 +1,112 @@
-import React, { useCallback, useMemo } from "react";
-import { FiPlus, FiEdit2, FiTrash2, FiCheck, FiX } from "react-icons/fi";
+"use client";
+import { useRef } from "react";
+import { motion, useScroll, useTransform } from "framer-motion";
+import { DealCard } from "@/src/components/deals/DealCard";
+import SectionHeader from "@/src/components/Common/SectionHeader";
 
-const AlbumItem = ({
-  album,
-  loading,
-  setAlbumName,
-  isSelected,
-  onSelect,
-  onEdit,
-  onDelete,
-  editAlbumId,
-  albumName,
-  handleAddOrUpdateAlbum,
-}) => {
-  const isEditing = editAlbumId === album._id;
+const BL = "#0167ff";
 
-  const handleSubmit = (e) => {
-    e.stopPropagation();
-    handleAddOrUpdateAlbum();
-  };
-
-  const handleCancel = (e) => {
-    e.stopPropagation();
-    onEdit(null);
-  };
-
-  const handleEditClick = (e) => {
-    e.stopPropagation();
-    onEdit(album);
-  };
-
+// Skeleton for loading state
+export function DealSkeletonGrid({ count = 8 }) {
   return (
-    <div
-      key={album._id}
-      onClick={() => !isEditing && onSelect(album._id)}
-      onKeyDown={(e) => !isEditing && e.key === "Enter" && onSelect(album._id)}
-      className={`flex items-center justify-between p-2 mb-2 rounded-lg cursor-pointer shadow-sm transition-all duration-200 ${
-        isSelected
-          ? "bg-secondary text-primary shadow-md"
-          : "bg-gray-50 text-gray-800 hover:bg-gray-100 hover:shadow-md"
-      } ${isEditing ? "ring-2 ring-secondary" : ""}`}
-      role="button"
-      tabIndex={0}
-      aria-label={`Select album ${album.albumName}`}
-    >
-      {isEditing ? (
-        <div className="flex items-center w-full gap-2">
-          <input
-            className="w-full flex-1 px-2 py-1 text-sm rounded border border-primary outline-none bg-white focus:outline-none"
-            value={albumName}
-            onChange={(e) => setAlbumName(e.target.value)}
-            onClick={(e) => e.stopPropagation()}
-            autoFocus
-          />
-          <button
-            onClick={handleSubmit}
-            disabled={loading}
-            className="p-1 text-green-600 hover:bg-green-100 rounded-full disabled:opacity-50"
-            aria-label="Save changes"
-          >
-            <FiCheck size={16} />
-          </button>
-          <button
-            onClick={handleCancel}
-            className="p-1 text-red-600 hover:bg-red-100 rounded-full"
-            aria-label="Cancel editing"
-          >
-            <FiX size={16} />
-          </button>
-        </div>
-      ) : (
-        <>
-          <span className="truncate flex-1 font-medium text-sm">
-            {album.albumName}
-          </span>
-          <div className="flex gap-1.5">
-            <button
-              onClick={handleEditClick}
-              className={`p-1.5 rounded-full transition-all ${
-                isSelected
-                  ? "hover:bg-primary/10 text-primary opacity-80 hover:opacity-100"
-                  : "hover:bg-gray-200 text-primary opacity-70 hover:opacity-100"
-              }`}
-              aria-label="Edit album"
-            >
-              <FiEdit2 size={16} />
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(album._id);
-              }}
-              className={`p-1.5 rounded-full transition-all ${
-                isSelected
-                  ? "hover:bg-red-100 text-red-600 opacity-80 hover:opacity-100"
-                  : "hover:bg-red-100 text-red-600 opacity-70 hover:opacity-100"
-              }`}
-              aria-label="Delete album"
-            >
-              <FiTrash2 size={16} />
-            </button>
+    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 sm:gap-4">
+      {Array.from({ length: count }).map((_, i) => (
+        <div
+          key={i}
+          className="rounded-2xl border border-gray-100 bg-white overflow-hidden animate-pulse shadow-sm"
+        >
+          <div className="aspect-[4/3] bg-gradient-to-br from-gray-100 to-gray-50" />
+          <div className="p-3 space-y-2.5">
+            <div className="h-3 bg-gray-100 rounded-full w-4/5" />
+            <div className="h-3 bg-gray-100 rounded-full w-3/5" />
+            <div className="h-px bg-gray-100 w-full" />
+            <div className="h-4 bg-gray-100 rounded-full w-2/5" />
           </div>
-        </>
-      )}
+        </div>
+      ))}
     </div>
   );
-};
+}
 
-const Sidebar = ({
-  albums,
-  loading,
-  setAlbumName,
-  setSidebarVisible,
-  handleAddOrUpdateAlbum,
-  handleEdit,
-  handleSelect,
-  handleDelete,
-  sidebarVisible,
-  albumName,
-  editAlbumId,
-  selectedAlbumId,
-}) => {
-  const [error, setError] = React.useState(null);
-
-  const onSelectAlbum = useCallback(
-    (id) => {
-      handleSelect(id);
-      if (window.innerWidth < 1280) setSidebarVisible(false);
-    },
-    [handleSelect, setSidebarVisible]
-  );
-
-  const handleAddAlbum = useCallback(() => {
-    if (!albumName.trim()) {
-      setError("Album name is required");
-      // setTimeout(() => setError(null), 3000);
-      return;
-    }
-    setError(null);
-    handleAddOrUpdateAlbum();
-  }, [albumName, handleAddOrUpdateAlbum]);
-
-  const albumList = useMemo(
-    () =>
-      albums.map((album) => (
-        <AlbumItem
-          key={album._id}
-          album={album}
-          isSelected={selectedAlbumId === album._id}
-          onSelect={onSelectAlbum}
-          onEdit={handleEdit}
-          onDelete={handleDelete}
-          editAlbumId={editAlbumId}
-          albumName={albumName}
-          setAlbumName={setAlbumName}
-          handleAddOrUpdateAlbum={handleAddOrUpdateAlbum}
-          loading={loading}
-        />
-      )),
-    [
-      albums,
-      selectedAlbumId,
-      onSelectAlbum,
-      handleEdit,
-      handleDelete,
-      editAlbumId,
-      albumName,
-      setAlbumName,
-      handleAddOrUpdateAlbum,
-      loading,
-    ]
-  );
+export default function DealsSection({
+  deals = [],
+  loading = false,
+  title,
+  label,
+  icon: Icon,
+  cta,
+  href,
+  commentPreviews = {},
+  commentCounts = {},
+  reactionData = { totals: {}, userLiked: {} },
+  onViewComments,
+}) {
+  const sectionRef = useRef(null);
+  const { scrollYProgress } = useScroll({
+    target: sectionRef,
+    offset: ["start end", "end start"],
+  });
+  const bgY = useTransform(scrollYProgress, [0, 1], [-20, 20]);
 
   return (
-    <>
-      {sidebarVisible && (
-        <div
-          className="fixed inset-0 bg-black/20 xl:hidden z-20"
-          onClick={() => setSidebarVisible(false)}
-          aria-hidden="true"
-        />
-      )}
+    <section ref={sectionRef} className="relative">
+      <motion.div
+        className="absolute inset-0 pointer-events-none rounded-3xl opacity-30"
+        style={{
+          y: bgY,
+          background: `radial-gradient(ellipse at 50% 50%,${BL}08,transparent 70%)`,
+        }}
+      />
+      <SectionHeader
+        Icon={Icon}
+        label={label}
+        title={title}
+        cta={cta}
+        href={href}
+      />
 
-      <aside
-        className={`fixed inset-y-0 left-0 bg-white border-r border-gray-200/50 w-[280px] flex flex-col transition-transform duration-300 ease-in-out transform ${
-          sidebarVisible ? "translate-x-0" : "-translate-x-full"
-        } xl:relative xl:translate-x-0 xl:w-64 z-30 max-h-full overflow-auto`}
-        role="navigation"
-        aria-label="Album sidebar"
-      >
-        {/* Input for adding new albums only */}
-        <div className="p-2 border-b border-gray-200/50">
-          <div className="flex items-start gap-2">
-            <div className="flex-1">
-              <input
-                className={`w-full px-3 py-2 rounded-lg border bg-gray-50 text-sm text-primary placeholder-gray-400 focus:outline-none focus:ring-2 transition-colors ${
-                  error
-                    ? "border-red-500 focus:ring-red-500 focus:border-red-500"
-                    : "border-gray-300 focus:ring-secondary focus:border-secondary"
-                }`}
-                value={editAlbumId ? "" : albumName}
-                onChange={(e) => {
-                  setAlbumName(e.target.value);
-                  if (error) setError(null);
-                }}
-                placeholder={
-                  editAlbumId ? "Editing album below..." : "Add new album"
-                }
-                aria-label={editAlbumId ? "Editing album" : "Add new album"}
-                disabled={!!editAlbumId}
-              />
-              {error && (
-                <p className="text-xs text-red-600 mt-1.5 flex items-center gap-1">
-                  <span>⚠</span> {error}
-                </p>
-              )}
-            </div>
-            <button
-              onClick={handleAddAlbum}
-              disabled={loading || !!editAlbumId}
-              className="bg-gradient-to-r from-secondary to-[#e8d4a6] text-primary p-2.5 rounded-lg hover:from-[#c9b085] hover:to-secondary transition-all disabled:opacity-50 shadow-sm hover:shadow-md"
-              aria-label="Add album"
-              title="Add album"
+      {loading ? (
+        <DealSkeletonGrid count={8} />
+      ) : deals.length === 0 ? (
+        <p className="text-center text-sm text-gray-400 py-12">
+          No deals available right now.
+        </p>
+      ) : (
+        <motion.div 
+          initial="hidden"
+          whileInView="show"
+          viewport={{ once: true, margin: "-10% 0px" }}
+          variants={{
+            show: {
+              transition: {
+                staggerChildren: 0.05,
+              }
+            }
+          }}
+          className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2.5 md:gap-3.5"
+        >
+          {deals.map((deal, i) => (
+            <motion.div 
+              key={deal.id || i}
+              variants={{
+                hidden: { opacity: 0, y: 20 },
+                show: { opacity: 1, y: 0 }
+              }}
+              transition={{ duration: 0.4, ease: "easeOut" }}
             >
-              <FiPlus size={18} />
-            </button>
-          </div>
-        </div>
-
-        {/* Album List */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-2">
-          {albums.length ? (
-            albumList
-          ) : (
-            <div className="flex items-center justify-center h-full text-gray-500 text-center">
-              <div>
-                <p className="text-sm mb-1 text-primary">No albums yet</p>
-                <p className="text-xs text-gray-400">
-                  Create your first album!
-                </p>
-              </div>
-            </div>
-          )}
-        </div>
-      </aside>
-    </>
+              <DealCard 
+                deal={deal} 
+                index={i} 
+                commentPreviews={commentPreviews[deal.id] || []}
+                commentCount={commentCounts[deal.id] || 0}
+                reactionTotal={reactionData.totals[deal.id] || 0}
+                userLiked={reactionData.userLiked[deal.id] || false}
+                onViewComments={onViewComments}
+              />
+            </motion.div>
+          ))}
+        </motion.div>
+      )}
+    </section>
   );
-};
-
-export default Sidebar;
+}

@@ -1,279 +1,97 @@
-import Link from "next/link";
-import React, { useMemo, useState } from "react";
-import {
-  FiFolder,
-  FiImage,
-  FiChevronLeft,
-  FiSettings,
-  FiShare2,
-  FiCalendar,
-  FiClock,
-  FiMoreHorizontal,
-  FiX,
-  FiMapPin,
-  FiShield,
-  FiLayers,
-} from "react-icons/fi";
+"use client";
+import { useEffect, useRef, useState } from "react";
+import { motion, useMotionValue, useTransform, animate } from "framer-motion";
+import { TrendingUp, ShoppingBag, Zap, Tag } from "lucide-react";
 
-const InfoItem = ({ icon: Icon, label, value, highlight = false }) => (
-  <div
-    className={`flex items-center gap-1 px-2 py-1 rounded-lg ${
-      highlight ? "bg-secondary/10 border border-secondary/20" : "bg-gray-50"
-    }`}
-  >
-    <Icon className="text-secondary text-sm flex-shrink-0" />
-    <span
-      className={`text-xs font-medium truncate ${
-        highlight ? "text-primary" : "text-third"
-      }`}
-    >
-      {value}
-    </span>
-    <span className="text-xs text-gray-500 flex-shrink-0">{label}</span>
-  </div>
-);
+const BL = "#0167ff";
+const GR = "#34c759";
 
-const ActionButton = ({ icon: Icon, label, href }) => (
-  <Link
-    href={href}
-    passHref
-    className="bg-gradient-to-r from-secondary to-[#e8d4a6] text-primary px-2 py-1 rounded-lg font-medium hover:from-[#c9b085] hover:to-secondary transition-all flex items-center gap-1 shadow-sm hover:shadow-md text-xs"
-    aria-label={label}
-    title={label}
-  >
-    <Icon className="text-sm" />
-    <span className="inline">{label}</span>
-  </Link>
-);
+const STATS = [
+  { v: "12M+", l: "Deals Tracked", Icon: TrendingUp },
+  { v: "500K+", l: "Happy Shoppers", Icon: ShoppingBag },
+  { v: "5", l: "Platforms Live", Icon: Zap },
+  { v: "₹2.5B+", l: "Savings Unlocked", Icon: Tag },
+];
 
-const Header = ({
-  oneEvent,
-  sidebarVisible,
-  setSidebarVisible,
-  storageType,
-  packageLimit = 0,
-  isPhotoBased,
-}) => {
-  const [showStatsModal, setShowStatsModal] = useState(false);
+function StatCard({ stat }) {
+  const ref = useRef(null);
+  const [inView, setInView] = useState(false);
+  const { Icon } = stat;
 
-  const actions = useMemo(
-    () => [
-      {
-        icon: FiSettings,
-        label: "Settings",
-        value: "settings",
-        href: `/event/${oneEvent?._id}/settings`,
-      },
-      {
-        icon: FiShare2,
-        label: "Share",
-        value: "share",
-        href: `/common-qr?event_id=${oneEvent?._id}`,
-      },
-    ],
-    [oneEvent],
-  );
+  const numMatch = stat.v.match(/[\d.]+/);
+  const numRaw = numMatch ? parseFloat(numMatch[0]) : null;
+  const prefix = stat.v.startsWith("₹") ? "₹" : "";
+  const suffix = stat.v.replace(/^₹?[\d.]+/, "");
+  const countVal = useMotionValue(0);
+  const [display, setDisplay] = useState(stat.v);
 
-  // Format dates properly
-  const formatEventDate = (dateString) => {
-    if (!dateString) return "N/A";
-    const date = new Date(dateString);
-    return date.toLocaleDateString("en-US", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      ([e]) => { if (e.isIntersecting) { setInView(true); obs.disconnect(); } },
+      { threshold: 0.3 }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!inView || !numRaw) return;
+    const controls = animate(countVal, numRaw, {
+      duration: 1.4,
+      ease: "easeOut",
+      onUpdate: (v) => {
+        const val = v < 1 ? v.toFixed(1) : Math.floor(v);
+        setDisplay(`${prefix}${val}${suffix}`);
+      }
     });
-  };
-
-  const stats = useMemo(
-    () => [
-      {
-        icon: FiFolder,
-        label: "Albums",
-        value: oneEvent?.totalAlbums || 0,
-        highlight: (oneEvent?.totalAlbums || 0) > 0,
-      },
-      {
-        icon: FiImage,
-        label: "Photos",
-        value: oneEvent?.totalPhotos || 0,
-        highlight: (oneEvent?.totalPhotos || 0) > 0,
-      },
-    ],
-    [oneEvent],
-  );
-
-  const eventDetails = useMemo(
-    () => [
-      {
-        icon: FiCalendar,
-        label: "Start",
-        value: formatEventDate(oneEvent?.eventStartDate),
-      },
-      {
-        icon: FiClock,
-        label: "End",
-        value: formatEventDate(oneEvent?.eventEndDate),
-      },
-      {
-        icon: FiMapPin,
-        label: "Location",
-        value: oneEvent?.location || "N/A",
-      },
-    ],
-    [oneEvent],
-  );
-
-  // Calculate storage percentage
-  const storagePercentage = useMemo(() => {
-    const used = isPhotoBased
-      ? oneEvent?.totalPhotos || 0
-      : oneEvent?.totalMBUsed || 0;
-    return packageLimit > 0 ? Math.min((used / packageLimit) * 100, 100) : 0;
-  }, [oneEvent, packageLimit, isPhotoBased]);
+    return () => controls.stop();
+  }, [inView, numRaw, countVal, prefix, suffix]);
 
   return (
-    <>
-      <header className="sticky top-0 z-20 bg-white/95 backdrop-blur-sm border-b border-gray-200/60 px-2 pb-2">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0 flex-1">
-            <button
-              onClick={() => setSidebarVisible(!sidebarVisible)}
-              className="xl:hidden flex items-center gap-2 flex-shrink-0 px-3 py-1.5 rounded-lg text-primary bg-gradient-to-r from-secondary/20 to-secondary/10 hover:from-secondary/30 hover:to-secondary/20 transition-all border border-secondary/30 hover:border-secondary/50"
-              aria-label={sidebarVisible ? "Hide sidebar" : "Show sidebar"}
-            >
-              <FiLayers className="text-base" />
-              <span className="text-sm font-medium">Albums</span>
-              <FiChevronLeft
-                className={`transition-transform duration-200 text-sm ${
-                  sidebarVisible ? "rotate-180" : ""
-                }`}
-              />
-            </button>
-            <div className="min-w-0 flex-1">
-              <h1 className="text-base font-semibold text-primary truncate">
-                {oneEvent?.eventName || "Event Name"}
-              </h1>
-              <p className="text-xs text-gray-500 line-clamp-1">
-                {oneEvent?.description || "No description available"}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setShowStatsModal(true)}
-              className="lg:hidden flex items-center gap-1 bg-gray-100 p-1.5 rounded-lg text-gray-700 hover:bg-secondary/10 hover:text-secondary transition-all"
-            >
-              <FiMoreHorizontal />
-              <span className="text-xs hidden sm:inline">Details</span>
-            </button>
-
-            <div className="hidden lg:flex gap-2">
-              {stats.map((item) => (
-                <InfoItem key={item.label} {...item} />
-              ))}
-            </div>
-
-            <div className="hidden sm:flex gap-1">
-              {actions.map((action) => (
-                <ActionButton key={action.value} {...action} />
-              ))}
-            </div>
-          </div>
-        </div>
-      </header>
-
-      {showStatsModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl w-full max-w-sm p-4 animate-in fade-in shadow-xl">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="font-semibold text-lg text-primary">
-                Event Details
-              </h3>
-              <button
-                onClick={() => setShowStatsModal(false)}
-                className="p-1 rounded-full hover:bg-gray-100 text-primary transition-colors"
-              >
-                <FiX />
-              </button>
-            </div>
-
-            {/* Event Info */}
-            <div className="mb-4">
-              <h4 className="text-sm font-medium text-primary mb-2">
-                Event Information
-              </h4>
-              <div className="grid gap-2">
-                {eventDetails.map((item) => (
-                  <div
-                    key={item.label}
-                    className="flex items-center gap-2 bg-gray-50 p-2 rounded-lg"
-                  >
-                    <item.icon className="text-secondary text-base flex-shrink-0" />
-                    <div className="min-w-0 flex-1">
-                      <span className="text-xs text-gray-500 block">
-                        {item.label}
-                      </span>
-                      <span className="text-sm font-medium text-gray-700 truncate block">
-                        {item.value}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Statistics */}
-            <div className="mb-4">
-              <h4 className="text-sm font-medium text-primary mb-2">
-                Statistics
-              </h4>
-              <div className="grid gap-2">
-                {stats.map((item) => (
-                  <div
-                    key={item.label}
-                    className="flex items-center gap-2 bg-gray-50 p-2 rounded-lg"
-                  >
-                    <item.icon className="text-secondary text-base flex-shrink-0" />
-                    <div className="min-w-0 flex-1">
-                      <span className="text-xs text-gray-500 block">
-                        {item.label}
-                      </span>
-                      <span className="text-sm font-medium text-gray-700 truncate block">
-                        {item.value}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Storage Progress Bar */}
-              <div className="mt-2 bg-gray-200 rounded-full h-2">
-                <div
-                  className="bg-gradient-to-r from-secondary to-[#e8d4a6] h-2 rounded-full transition-all duration-300"
-                  style={{ width: `${storagePercentage}%` }}
-                />
-              </div>
-              <p className="text-xs text-gray-500 mt-1">
-                {storagePercentage.toFixed(1)}%{" "}
-                {isPhotoBased
-                  ? "of photo limit used"
-                  : "of package storage used"}
-              </p>
-            </div>
-
-            {/* Actions */}
-            <div className="grid grid-cols-2 gap-2">
-              {actions.map((action) => (
-                <ActionButton key={action.value} {...action} />
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-    </>
+    <motion.div
+      ref={ref}
+      variants={{
+        hidden: { opacity: 0, y: 30, scale: 0.95 },
+        show: { opacity: 1, y: 0, scale: 1 }
+      }}
+      whileHover={{ y: -5, scale: 1.02 }}
+      className="flex items-center gap-4 bg-white rounded-3xl px-5 py-5 cursor-default border border-gray-50 shadow-[0_10px_30px_rgba(0,0,0,0.02)] hover:shadow-[0_15px_35px_rgba(1,103,255,0.06)] transition-all duration-300"
+    >
+      <motion.div
+        whileHover={{ rotate: 8, scale: 1.1 }}
+        className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0"
+        style={{ background: `${BL}08` }}
+      >
+        <Icon className="w-5 h-5" style={{ color: BL }} />
+      </motion.div>
+      <div>
+        <p className="text-lg font-bold text-gray-900 leading-tight tabular-nums tracking-tight">{display}</p>
+        <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mt-0.5">{stat.l}</p>
+      </div>
+    </motion.div>
   );
-};
+}
 
-export default Header;
+export default function StatsSection() {
+  return (
+    <motion.div 
+      initial="hidden"
+      whileInView="show"
+      viewport={{ once: true, margin: "-10% 0px" }}
+      variants={{
+        show: {
+          transition: {
+            staggerChildren: 0.1,
+          }
+        }
+      }}
+      className="grid grid-cols-2 sm:grid-cols-4 gap-3"
+    >
+      {STATS.map((s, i) => (
+        <StatCard key={i} stat={s} />
+      ))}
+    </motion.div>
+  );
+}
