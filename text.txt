@@ -1,235 +1,261 @@
 "use client";
-
-import dynamic from "next/dynamic";
-import Link from "next/link";
-import { useState, useEffect } from "react";
-import { motion } from "framer-motion";
-import { Flame, Tag, ArrowRight, ShoppingBag } from "lucide-react";
-
-// ── Context / Services
+import { compareProductUrl, searchProducts } from "@/src/api/pythonApiService";
+import {
+  AILoader,
+  BL,
+  EmptyState,
+  InlineSearch,
+  PlatformSection,
+  ResultsBar,
+} from "@/src/components/search/SearchComponents";
 import { useRootData } from "@/src/context/rootContext";
-import { getSlider } from "@/src/services/homePageService";
+import { AnimatePresence } from "framer-motion";
+import { ArrowLeft } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-// ── Hooks
+export default function SearchPage() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const query = searchParams.get("q");
+  const urlParam = searchParams.get("url");
 
-import { useDealsList, todayDealsFilters } from "@/src/hooks/useDealsList";
+  const { isAuthenticated, isLoadingUser, setLoginModalOpen, triggerSearch } =
+    useRootData();
 
-// ── Section Components (static imports)
-import StatsSection from "@/src/components/Home/StatsSection";
-import DealsSection from "@/src/components/Home/DealsSection";
-import PromoSlider from "@/src/components/Home/PromoSlider";
-import PlatformSection from "@/src/components/Home/PlatformSection";
-import SectionHeader from "@/src/components/Common/SectionHeader";
-import CommentModal from "@/src/components/deals/CommentModal";
-import { fetchBulkCardComments } from "@/src/services/commentService";
+  const [loading, setLoading] = useState(true);
+  const [results, setResults] = useState(null);
+  const [elapsed, setElapsed] = useState(0);
+  const [activePlatform, setActivePlatform] = useState("All");
 
-// ── Lazy / no SSR — components that touch window, WebGL, or browser-only APIs
-import HeroSection from "../components/Home/HeroSection";
+  const startRef = useRef(Date.now());
+  const timerRef = useRef(null);
+  const abortControllerRef = useRef(null);
 
-const TelegramPopup = dynamic(
-  () => import("../components/Home/TelegramPopup"),
-  { ssr: false },
-);
+  const startTimer = () => {
+    startRef.current = Date.now();
+    timerRef.current = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startRef.current) / 1000));
+    }, 1000);
+  };
 
-// ── Constants
-const BL = "#0167ff";
-const GR = "#34c759";
+  const stopTimer = () => {
+    clearInterval(timerRef.current);
+    setElapsed(Math.floor((Date.now() - startRef.current) / 1000));
+  };
+  const performSearch = useCallback(
+    async (q = query, u = urlParam) => {
+      if (abortControllerRef.current) abortControllerRef.current.abort();
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
 
-/* ─────────────────────────────────────────────
-   HOME PAGE
-───────────────────────────────────────────── */
-export default function HomePage() {
-  const [query, setQuery] = useState("");
-  const [slides, setSlides] = useState([]);
-  const { triggerSearch } = useRootData();
+      setLoading(true);
+      setResults(null);
+      setElapsed(0);
+      startTimer();
+      try {
+        let data;
+        if (u) data = await compareProductUrl(u, { signal: controller.signal });
+        else if (q)
+          data = await searchProducts(q, { signal: controller.signal });
+        setResults(data);
+      } catch (err) {
+        if (
+          ["CanceledError", "AbortError"].includes(err.name) ||
+          err.message === "canceled"
+        ) {
+          console.log("Search request aborted");
+          return;
+        }
+        console.error("Search failed:", err);
+        setResults(null);
+      } finally {
+        if (abortControllerRef.current === controller) {
+          stopTimer();
+          setLoading(false);
+          abortControllerRef.current = null;
+        }
+      }
+    },
+    [query, urlParam],
+  );
 
-  // ── Reaction/Comment Data states
-  const [commentPreviews, setCommentPreviews] = useState({});
-  const [commentCounts, setCommentCounts] = useState({});
-  const [reactionData, setReactionData] = useState({
-    totals: {},
-    userLiked: {},
-  });
-  const [commentModalDeal, setCommentModalDeal] = useState(null);
 
-  // ── Today's Deals (API)
-  const {
-    deals: todayDeals,
-    loading: todayLoading,
-    reload: reloadTodayDeals,
-  } = useDealsList({
-    initialFilters: todayDealsFilters,
-    autoLoad: false,
-    limit: 8,
-  });
+  // ── Authentication Check Logic ──
+  // useEffect(() => {
+  //   // 1. Wait for user profile to finish loading
+  //   if (isLoadingUser) return;
 
-  // ── Fetch both on mount
+  //   // 2. Handle empty queries
+  //   if (!query && !urlParam) {
+  //     setLoading(false);
+  //     return;
+  //   }
+
+  //   // 3. Only trigger login modal if strictly NOT authenticated
+  //   if (!isAuthenticated) {
+  //     setLoading(false);
+  //     setLoginModalOpen(true);
+  //     return;
+  //   }
+
+  //   // 4. Start search if authenticated
+  //   performSearch();
+  // }, [
+  //   performSearch,
+  //   isAuthenticated,
+  //   isLoadingUser,
+  //   query,
+  //   urlParam,
+  //   setLoginModalOpen,
+  // ]);
+
+  // ── Navigation Protection & Unmount Cleanup ──
   useEffect(() => {
-    reloadTodayDeals();
-    getSlider()
-      .then((d) => {
-        if (d?.length) setSlides(d);
-      })
-      .catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (!loading) return;
+
+    const handleBeforeUnload = (e) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+
+    const handleClick = (e) => {
+      const anchor = e.target.closest("a");
+      if (anchor && anchor.href && !anchor.target) {
+        try {
+          const url = new URL(anchor.href, window.location.href);
+          if (
+            url.pathname !== window.location.pathname ||
+            url.search !== window.location.search
+          ) {
+            if (
+              !window.confirm(
+                "A search is currently in progress. Are you sure you want to leave this page?",
+              )
+            ) {
+              e.preventDefault();
+              e.stopPropagation();
+            }
+          }
+        } catch (err) {}
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    document.addEventListener("click", handleClick, { capture: true });
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      document.removeEventListener("click", handleClick, { capture: true });
+    };
+  }, [loading]);
+
+  useEffect(() => {
+    return () => {
+      clearInterval(timerRef.current);
+      if (abortControllerRef.current) abortControllerRef.current.abort();
+    };
   }, []);
 
-  // ── Fetch reactions in bulk
-  useEffect(() => {
-    if (!todayDeals.length) return;
-    const dealIds = todayDeals.map((d) => d.id);
-    const unloaded = dealIds.filter(
-      (id) => reactionData.totals[id] === undefined,
-    );
-    if (!unloaded.length) return;
+  const handleInlineSearch = (newQ) => triggerSearch(newQ);
 
-    import("@/src/services/reactionService")
-      .then(({ getBulkReactions }) => getBulkReactions(unloaded))
-      .then((data) => {
-        if (data) {
-          setReactionData((prev) => ({
-            totals: { ...prev.totals, ...(data.totals || {}) },
-            userLiked: { ...prev.userLiked, ...(data.userLiked || {}) },
-          }));
-        }
-      })
-      .catch(console.error);
-  }, [todayDeals]);
+  const allProducts = useMemo(() => {
+    if (!results?.platforms) return [];
+    return Object.values(results.platforms).flat();
+  }, [results]);
 
-  // ── Fetch comment previews in bulk
-  useEffect(() => {
-    if (!todayDeals.length) return;
-    const dealIds = todayDeals.map((d) => d.id);
-    const newIds = dealIds.filter((id) => commentPreviews[id] === undefined);
-    if (!newIds.length) return;
+  const platformList = useMemo(() => {
+    if (!results?.platforms) return ["All"];
+    return [
+      "All",
+      ...Object.keys(results.platforms).filter(
+        (p) => results.platforms[p]?.length > 0,
+      ),
+    ];
+  }, [results]);
 
-    fetchBulkCardComments(newIds)
-      .then((data) => {
-        if (data?.previews)
-          setCommentPreviews((prev) => ({ ...prev, ...data.previews }));
-        if (data?.counts)
-          setCommentCounts((prev) => ({ ...prev, ...data.counts }));
-      })
-      .catch(console.error);
-  }, [todayDeals]);
-
-  const handleSearch = (e) => {
-    e.preventDefault();
-    triggerSearch(query, true);
-  };
-  const handleChip = (q) => {
-    setQuery(q);
-    triggerSearch(q, true);
-  };
+  const filteredProducts = useMemo(() => {
+    if (activePlatform === "All") return allProducts;
+    return results?.platforms[activePlatform] || [];
+  }, [activePlatform, allProducts, results]);
 
   return (
-    <main className="min-h-screen bg-[#f4f8ff]">
-      <TelegramPopup />
+    <div className="min-h-screen bg-[#f8f9fb] pb-20">
+      <AnimatePresence>
+        {loading && <AILoader query={query || urlParam} elapsed={elapsed} />}
+      </AnimatePresence>
 
-      {/* ══ HERO ══════════════════════════════════════════ */}
-      <HeroSection
-        query={query}
-        setQuery={setQuery}
-        onSearch={handleSearch}
-        onChip={handleChip}
-      />
-
-      {/* ══ BELOW-HERO SECTIONS ═══════════════════════════ */}
-      <div className="mx-auto xl:container px-4 sm:px-6 lg:px-8 py-10 sm:py-14 space-y-10">
-        {/* Divider */}
-        <div
-          className="h-px w-full"
-          style={{
-            background: `linear-gradient(to right,transparent,${BL}40,${GR}40,transparent)`,
-          }}
-        />
-
-        {/* Stats */}
-        <StatsSection />
-
-        {/* ── Today's Best Deals (live API) */}
-        <DealsSection
-          deals={todayDeals}
-          loading={todayLoading}
-          title="Best Deals Today"
-          label="Hot right now"
-          icon={Flame}
-          cta="View all deals"
-          href="/best-deals"
-          commentPreviews={commentPreviews}
-          commentCounts={commentCounts}
-          reactionData={reactionData}
-          onViewComments={(d) => setCommentModalDeal(d)}
-        />
-
-        {/* Browse-all CTA */}
-        <div className="flex justify-center -mt-8">
-          <Link href="/best-deals">
-            <motion.div
-              whileHover={{ scale: 1.04 }}
-              whileTap={{ scale: 0.97 }}
-              data-cursor-label="Browse Deals"
-              className="relative inline-flex items-center gap-2 px-7 py-3 rounded-xl font-black text-sm text-white overflow-hidden shadow-xl"
-              style={{ background: `linear-gradient(135deg,${BL},${GR})` }}
+      <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-md border-b border-gray-100 px-4 py-3">
+        <div className="max-w-7xl mx-auto flex flex-col gap-1">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => router.push("/")}
+              className="p-2 hover:bg-gray-100 rounded-full transition-colors"
             >
-              <motion.div
-                className="absolute inset-0 bg-gradient-to-r from-transparent via-white/15 to-transparent -skew-x-12"
-                animate={{ x: ["-120%", "200%"] }}
-                transition={{
-                  duration: 3,
-                  repeat: Infinity,
-                  ease: "easeInOut",
-                  repeatDelay: 1.2,
-                }}
-              />
-              <ShoppingBag className="w-4 h-4 relative z-10" />
-              <span className="relative z-10">Browse All Deals</span>
-              <ArrowRight className="w-4 h-4 relative z-10" />
-            </motion.div>
-          </Link>
+              <ArrowLeft className="w-5 h-5 text-gray-600" />
+            </button>
+            <div className="flex-1 flex flex-col min-w-0">
+              <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">
+                AI Search Active
+              </span>
+              <h1 className="text-sm font-black text-gray-900 truncate">
+                {query || "Comparing URL..."}
+              </h1>
+            </div>
+          </div>
+          <InlineSearch currentQuery={query} onSearch={handleInlineSearch} />
         </div>
+      </header>
 
-        {/* Divider */}
-        <div
-          className="h-px w-full"
-          style={{
-            background: `linear-gradient(to right,transparent,${BL}40,${GR}40,transparent)`,
-          }}
+      {!loading && results && (
+        <main className="max-w-7xl mx-auto">
+          <ResultsBar count={allProducts.length} elapsed={elapsed} />
+
+          <div className="flex items-center gap-2 overflow-x-auto px-4 py-4 no-scrollbar">
+            {platformList.map((p) => (
+              <button
+                key={p}
+                onClick={() => setActivePlatform(p)}
+                className="px-4 py-2 rounded-2xl text-xs font-black whitespace-nowrap transition-all border"
+                style={{
+                  background: activePlatform === p ? BL : "white",
+                  color: activePlatform === p ? "white" : "#64748b",
+                  borderColor: activePlatform === p ? BL : "#e2e8f0",
+                  boxShadow:
+                    activePlatform === p ? `0 4px 12px ${BL}30` : "none",
+                }}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+
+          <div className="px-4">
+            {activePlatform === "All" ? (
+              Object.keys(results.platforms || {}).map((p) => (
+                <PlatformSection
+                  key={p}
+                  platform={p}
+                  products={results.platforms[p]}
+                />
+              ))
+            ) : (
+              <PlatformSection
+                platform={activePlatform}
+                products={filteredProducts}
+              />
+            )}
+          </div>
+        </main>
+      )}
+
+      {!loading && results && allProducts.length === 0 && (
+        <EmptyState
+          query={query}
+          onBack={() => router.push("/")}
+          elapsed={elapsed}
         />
-
-        {/* Promo Slider */}
-        {slides.length > 0 && (
-          <section>
-            <SectionHeader
-              Icon={Tag}
-              label="Exclusive offers"
-              title="Featured Promotions"
-            />
-            <PromoSlider slides={slides} />
-          </section>
-        )}
-        {/* Platform CTA */}
-        <PlatformSection />
-      </div>
-
-      {/* Comment Modal */}
-      <CommentModal
-        deal={commentModalDeal}
-        onClose={() => setCommentModalDeal(null)}
-        onCommentCreated={(newCm) => {
-          setCommentCounts((prev) => ({
-            ...prev,
-            [commentModalDeal.id]: (prev[commentModalDeal.id] || 0) + 1,
-          }));
-          setCommentPreviews((prev) => ({
-            ...prev,
-            [commentModalDeal.id]: [
-              newCm,
-              ...(prev[commentModalDeal.id] || []),
-            ].slice(0, 2),
-          }));
-        }}
-      />
-    </main>
+      )}
+    </div>
   );
 }
