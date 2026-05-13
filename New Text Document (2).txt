@@ -1,0 +1,198 @@
+"use client";
+import { useEffect, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { X, Send, Bell, Users, Zap, ChevronRight } from "lucide-react";
+import siteMetadata from "@/src/utils/siteMetaData";
+
+const STORAGE_KEY = "ddl_tg_popup_dismissed";
+const SCROLL_THRESHOLD = 0.25; // show after 25% scroll
+
+export default function TelegramPopup() {
+  const [visible, setVisible] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+
+  useEffect(() => {
+    // Don't show if already dismissed this session
+    if (sessionStorage.getItem(STORAGE_KEY)) return;
+
+    const onScroll = () => {
+      const scrolled =
+        window.scrollY / (document.body.scrollHeight - window.innerHeight);
+      if (scrolled >= SCROLL_THRESHOLD && !dismissed) {
+        setVisible(true);
+        window.removeEventListener("scroll", onScroll);
+      }
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [dismissed]);
+
+  const dismiss = () => {
+    setVisible(false);
+    setDismissed(true);
+    sessionStorage.setItem(STORAGE_KEY, "1");
+  };
+
+  const join = () => {
+    window.open(siteMetadata.socialLinks.telegram, "_blank");
+    dismiss();
+  };
+
+  return (
+    <AnimatePresence>
+      {visible && (
+        <>
+          {/* Backdrop */}
+          <motion.div
+            key="tg-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            className="fixed inset-0 z-[9990] bg-black/40 backdrop-blur-sm"
+            onClick={dismiss}
+          />
+
+          {/* Card */}
+          <motion.div
+            key="tg-popup"
+            initial={{ opacity: 0, scale: 0.82, y: 40 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.88, y: 30 }}
+            transition={{ type: "spring", stiffness: 300, damping: 26 }}
+            className="fixed bottom-6 left-4 right-4 sm:left-auto sm:right-6 sm:w-[360px] z-[9999] rounded-3xl overflow-hidden shadow-2xl"
+            style={{
+              boxShadow:
+                "0 24px 60px rgba(1,103,255,0.25), 0 8px 24px rgba(0,0,0,0.15)",
+            }}
+          >
+            {/* Gradient background */}
+            <div className="relative bg-gradient-to-br from-[#0b3482] via-[#0a54c9] to-primary p-6 pb-7">
+              {/* Animated blobs */}
+              <motion.div
+                className="absolute top-0 right-0 w-40 h-40 rounded-full opacity-20 pointer-events-none"
+                style={{
+                  background: "radial-gradient(circle, #fff, transparent 70%)",
+                }}
+                animate={{ scale: [1, 1.2, 1], x: [0, 10, 0] }}
+                transition={{
+                  duration: 6,
+                  repeat: Infinity,
+                  ease: "easeInOut",
+                }}
+              />
+              <motion.div
+                className="absolute bottom-0 left-0 w-32 h-32 rounded-full opacity-10 pointer-events-none"
+                style={{
+                  background:
+                    "radial-gradient(circle, #34c759, transparent 70%)",
+                }}
+                animate={{ scale: [1, 1.3, 1] }}
+                transition={{
+                  duration: 8,
+                  repeat: Infinity,
+                  ease: "easeInOut",
+                  delay: 1,
+                }}
+              />
+
+              {/* Close */}
+              <button
+                onClick={dismiss}
+                className="absolute top-4 right-4 w-7 h-7 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center text-white transition-colors z-10"
+              >
+                <X size={14} />
+              </button>
+
+              {/* Telegram Icon */}
+              <motion.div
+                initial={{ scale: 0, rotate: -20 }}
+                animate={{ scale: 1, rotate: 0 }}
+                transition={{ delay: 0.15, type: "spring", stiffness: 260 }}
+                className="w-16 h-16 rounded-2xl bg-white/20 backdrop-blur flex items-center justify-center mb-4 shadow-lg"
+              >
+                {/* Telegram SVG */}
+                <svg width="34" height="34" viewBox="0 0 24 24" fill="white">
+                  <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
+                </svg>
+              </motion.div>
+
+              <motion.h3
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+                className="text-xl font-black text-white leading-tight mb-1"
+              >
+                Join our Telegram!
+              </motion.h3>
+              <motion.p
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.26 }}
+                className="text-sm text-white/70 leading-relaxed"
+              >
+                Get instant deal alerts before everyone else. Never miss a great
+                deal again!
+              </motion.p>
+
+              {/* Stats row */}
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.32 }}
+                className="flex items-center gap-4 mt-4"
+              >
+                {[
+                  { icon: Users, label: "50K+ Members" },
+                  { icon: Bell, label: "Daily Alerts" },
+                  { icon: Zap, label: "Instant Deals" },
+                ].map(({ icon: Icon, label }) => (
+                  <div
+                    key={label}
+                    className="flex items-center gap-1 text-white/80 text-[11px] font-semibold"
+                  >
+                    <Icon size={11} className="text-white/60" />
+                    {label}
+                  </div>
+                ))}
+              </motion.div>
+            </div>
+
+            {/* Action buttons */}
+            <div className="bg-white px-5 py-4 flex gap-3">
+              <motion.button
+                onClick={join}
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
+                className="relative flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-black text-sm text-white overflow-hidden shadow-lg"
+                style={{
+                  background: "linear-gradient(135deg, #0167ff, #0044cc)",
+                }}
+              >
+                <motion.div
+                  className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -skew-x-12"
+                  animate={{ x: ["-120%", "200%"] }}
+                  transition={{
+                    duration: 2.5,
+                    repeat: Infinity,
+                    ease: "easeInOut",
+                    repeatDelay: 1,
+                  }}
+                />
+                <Send size={14} className="relative z-10" />
+                <span className="relative z-10">Join Now — Free</span>
+                <ChevronRight size={14} className="relative z-10" />
+              </motion.button>
+              <button
+                onClick={dismiss}
+                className="px-4 py-3 rounded-xl text-sm font-semibold text-gray-500 bg-gray-100 hover:bg-gray-200 transition-colors"
+              >
+                Later
+              </button>
+            </div>
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
+  );
+}
